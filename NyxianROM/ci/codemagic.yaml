@@ -1,58 +1,66 @@
-# Codemagic 版（备选：磁盘更大，免费额度 500 分钟/月，可自选 Xcode 版本）
+# Codemagic build for nyxian-rom-builder
 #
-# 放法：和 Nyxian 源码放同一个仓库根目录，命名 codemagic.yaml
-#       前提：仓库里同时有 Nyxian 源码和 NyxianROM/ 目录。
+# Produces three artifacts:
+#   nyxian/Nyxian.ipa        stock UI, needs a ROM flash
+#   NyxianROM/rom.zip        ROM slot package
+#   NyxianROM/Nyxian-baked.ipa  stock slot replaced by this ROM, boots straight into it
 #
-# 说明：
-#   * Codemagic 的 mac_mini_m2 实例磁盘比 GitHub 标准 runner 大，编 LLVM 更稳
-#   * xcode 版本用 27.x（Codemagic 会列出可用版本；如果 27 还没 GA 就选 26.x，
-#     然后把 Nyxian 里 `#available(iOS 26.0, *)` 的分支保留）
-#   * 免费额度用完后按分钟计费
+# Flow: clone emexlab/Nyxian at NYXIAN_REF, build LLVM-on-iOS (cached),
+# build the app, then run NyxianROM/build.sh --ipa.
 
 workflows:
   nyxian-rom:
     name: Nyxian + NyxianROM
     instance_type: mac_mini_m2
-    max_build_duration: 340
+    max_build_duration: 240
     environment:
-      xcode: 27.1
+      xcode: latest
       vars:
+        NYXIAN_REPO: https://github.com/emexlab/Nyxian.git
         NYXIAN_REF: "0d573db99dca"
     cache:
       cache_paths:
-        - $CM_BUILD_DIR/Frameworks/CoreCompiler/CoreCompilerSupportLibs
+        - $CM_BUILD_DIR/nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
     scripts:
-      - name: Pin ref + submodules
+      - name: Clone Nyxian
         script: |
           set -e
+          git clone --filter=blob:none "$NYXIAN_REPO" nyxian
+          cd nyxian
           git checkout "$NYXIAN_REF"
           git submodule update --init --recursive
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
 
-      - name: Build LLVM (cached)
+      - name: Build LLVM-on-iOS (cached)
         script: |
           set -e
-          if [ ! -d Frameworks/CoreCompiler/CoreCompilerSupportLibs ]; then
+          if [ ! -d nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs ]; then
             brew install cmake ninja pkgconf || true
-            make -C LLVM-On-iOS -j"$(sysctl -n hw.ncpu)"
-            rm -rf Frameworks/CoreCompiler/CoreCompilerSupportLibs
-            mkdir -p Frameworks/CoreCompiler/CoreCompilerSupportLibs
-            cp -R LLVM-On-iOS/CoreCompilerSupportLibs/. Frameworks/CoreCompiler/CoreCompilerSupportLibs/
-            cp -R LLVM-On-iOS/LLVM.xcframework Frameworks/CoreCompiler/CoreCompilerSupportLibs/LLVM.xcframework
+            make -C nyxian/LLVM-On-iOS -j"$(sysctl -n hw.ncpu)"
+            rm -rf nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
+            mkdir -p nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
+            cp -R nyxian/LLVM-On-iOS/CoreCompilerSupportLibs/. nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/
+            cp -R nyxian/LLVM-On-iOS/LLVM.xcframework nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/LLVM.xcframework
+          else
+            echo "LLVM cache hit"
           fi
+          du -sh nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs || true
 
-      - name: Build Nyxian
+      - name: Build Nyxian.ipa
         script: |
           set -e
           brew install pkgconf cmake libarchive dpkg openssl ninja || true
-          make CHECK_DEPS=0
+          make -C nyxian CHECK_DEPS=0
 
-      - name: Build ROM + bake ipa
+      - name: Build ROM and bake ipa
         script: |
           set -e
           chmod +x NyxianROM/build.sh NyxianROM/tools/fetch_kexts.sh
-          ./NyxianROM/build.sh "$CM_BUILD_DIR" --ipa
+          ./NyxianROM/build.sh "$CM_BUILD_DIR/nyxian" --ipa
+          ls -lh NyxianROM/rom.zip NyxianROM/Nyxian-baked.ipa
 
     artifacts:
-      - Nyxian.ipa
+      - nyxian/Nyxian.ipa
       - NyxianROM/rom.zip
       - NyxianROM/Nyxian-baked.ipa
