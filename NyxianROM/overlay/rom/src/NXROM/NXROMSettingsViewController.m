@@ -1,14 +1,11 @@
 /*
  * NXROMSettingsViewController.m
- *
- * 这里尽量只用公开 API + 我们手里有头文件的 ksurface 接口：
- *   trust_enforcement_set_mode() / PEUserspaceManager / klog_dump()
- * 拿不准的（NXBootstrap 之类）一律走 NSClassFromString + respondsToSelector。
  */
 
 #import "NXROMSettingsViewController.h"
 #import "NXROMSystemInfo.h"
 #import "NXROMAppRegistry.h"
+#import "NXROMDesign.h"
 
 #import <LindChain/ProcEnvironment/PEUserspaceManager.h>
 #import <LindChain/ProcEnvironment/Surface/trust/trust.h>
@@ -17,75 +14,80 @@
 static NSString *const kNXROMModeKey = @"nyxian.boot.entitlements.mode";
 static NSString *const kNXROMKextKey = @"nyxian.boot.kextLoading";
 
-@interface NXROMRow : NSObject
+#pragma mark - 行模型
+
+typedef NS_ENUM(NSInteger, NXROMSettingsRowKind) {
+    NXROMSettingsRowKindNavigation = 0,
+    NXROMSettingsRowKindSwitch = 1,
+    NXROMSettingsRowKindValue = 2,
+};
+
+@interface NXROMSettingsRow : NSObject
 @property (nonatomic, copy) NSString *title;
-@property (nonatomic, copy, nullable) NSString *detail;
-@property (nonatomic, copy, nullable) void (^action)(UIViewController *presenter);
-@property (nonatomic, assign) BOOL isSwitch;
+@property (nonatomic, copy, nullable) NSString *value;
+@property (nonatomic, copy, nullable) NSString *symbolName;
+@property (nonatomic, strong, nullable) UIColor *tintColor;
+@property (nonatomic) NXROMSettingsRowKind kind;
+@property (nonatomic, copy, nullable) void (^action)(NXROMSettingsViewController *controller);
 @property (nonatomic, copy, nullable) NSString *switchKey;
 @end
 
-@implementation NXROMRow
+@implementation NXROMSettingsRow
 @end
 
-@interface NXROMLogViewController : UIViewController
-@property (nonatomic, strong) UITextView *textView;
+#pragma mark - 列表页
+
+@interface NXROMListViewController : UITableViewController
+@property (nonatomic, copy) NSString *header;
+@property (nonatomic, copy) NSArray<NSString *> *lines;
+@property (nonatomic) BOOL monospaced;
 @end
 
-@implementation NXROMLogViewController
+@implementation NXROMListViewController
 
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-
-    self.title = @"内核日志";
-    self.view.backgroundColor = UIColor.systemBackgroundColor;
-
-    self.textView = [[UITextView alloc] initWithFrame:CGRectZero];
-    self.textView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.textView.editable = NO;
-    self.textView.alwaysBounceVertical = YES;
-    self.textView.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightRegular];
-    self.textView.textContainerInset = UIEdgeInsetsMake(12.0, 10.0, 24.0, 10.0);
-    self.textView.text = klog_dump() ?: @"(empty)";
-    [self.view addSubview:self.textView];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [self.textView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.textView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.textView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [self.textView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-    ]];
-
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"刷新"
-                                                                             style:UIBarButtonItemStylePlain
-                                                                            target:self
-                                                                            action:@selector(refresh)];
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
 }
 
-- (void)refresh
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    self.textView.text = klog_dump() ?: @"(empty)";
+    return (NSInteger)self.lines.count;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell"];
+    if(cell == nil)
+    {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"cell"];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.textLabel.numberOfLines = 0;
+    }
+
+    NSString *line = self.lines[(NSUInteger)indexPath.row];
+    cell.textLabel.text = line;
+    cell.textLabel.font = self.monospaced
+        ? [UIFont monospacedSystemFontOfSize:10.0 weight:UIFontWeightRegular]
+        : [UIFont systemFontOfSize:14.0 weight:UIFontWeightRegular];
+    return cell;
 }
 
 @end
 
+#pragma mark - 设置
+
 @interface NXROMSettingsViewController ()
-@property (nonatomic, strong) NSArray<NSArray<NXROMRow *> *> *sections;
+@property (nonatomic, strong) NSArray<NSArray<NXROMSettingsRow *> *> *sections;
 @property (nonatomic, copy) NSArray<NSString *> *sectionTitles;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, UISwitch *> *switches;
 
 - (void)buildSections;
-- (NSString *)currentModeTitle;
+- (void)showListWithTitle:(NSString *)title lines:(NSArray<NSString *> *)lines monospaced:(BOOL)monospaced;
 - (void)chooseEnforcementMode;
-- (void)confirm:(NSString *)title
-        message:(nullable NSString *)message
-         action:(NSString *)action
-         handle:(void (^)(void))handle;
-- (void)showText:(NSString *)text title:(NSString *)title;
-- (void)showList:(NSArray<NSDictionary *> *)items
-           title:(NSString *)title
-            keys:(NSArray<NSString *> *)keys
-         formats:(NSArray<NSString *> *)formats;
+- (void)confirmTitle:(NSString *)title message:(nullable NSString *)message action:(NSString *)action handle:(void (^)(void))handle;
+- (NSString *)modeTitle;
 @end
 
 @implementation NXROMSettingsViewController
@@ -95,172 +97,239 @@ static NSString *const kNXROMKextKey = @"nyxian.boot.kextLoading";
     [super viewDidLoad];
 
     self.title = @"设置";
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-                                                                                           target:self
-                                                                                           action:@selector(dismissSelf)];
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+    self.tableView.rowHeight = 46.0;
+    self.switches = [NSMutableDictionary dictionary];
 
     [self buildSections];
 }
-
-- (void)dismissSelf
-{
-    [self dismissViewControllerAnimated:YES completion:nil];
-}
-
-#pragma mark - 数据
 
 - (void)buildSections
 {
     __weak typeof(self) weakSelf = self;
 
-    /* 系统 */
-    NXROMRow *hostname = [NXROMRow new];
+    NXROMSettingsRow *device = [NXROMSettingsRow new];
+    device.kind = NXROMSettingsRowKindValue;
+    device.title = UIDevice.currentDevice.model;
+    device.value = [NSString stringWithFormat:@"iOS %@", UIDevice.currentDevice.systemVersion];
+    device.symbolName = @"iphone";
+    device.tintColor = [UIColor systemGrayColor];
+
+    NXROMSettingsRow *hostname = [NXROMSettingsRow new];
+    hostname.kind = NXROMSettingsRowKindValue;
     hostname.title = @"主机名";
-    hostname.detail = [NXROMSystemInfo hostname];
+    hostname.value = [NXROMSystemInfo hostname];
+    hostname.symbolName = @"network";
+    hostname.tintColor = [UIColor systemBlueColor];
 
-    NXROMRow *processes = [NXROMRow new];
+    NXROMSettingsRow *processes = [NXROMSettingsRow new];
+    processes.kind = NXROMSettingsRowKindNavigation;
     processes.title = @"进程";
-    processes.detail = [NSString stringWithFormat:@"%lu", (unsigned long)[NXROMSystemInfo processCount]];
-    processes.action = ^(UIViewController *presenter) {
-        [weakSelf showList:[NXROMSystemInfo processes]
-                     title:@"进程"
-                      keys:@[ @"pid", @"name", @"uid" ]
-                   formats:@[ @"pid %@", @"%@", @"uid %@" ]];
-    };
+    processes.value = [NSString stringWithFormat:@"%lu", (unsigned long)[NXROMSystemInfo processCount]];
+    processes.symbolName = @"cpu";
+    processes.tintColor = [UIColor systemGreenColor];
+    processes.action = ^(NXROMSettingsViewController *controller) {
+        NSArray<NSDictionary *> *items = [NXROMSystemInfo processes];
+        NSMutableArray<NSString *> *lines = [NSMutableArray array];
+        for(NSDictionary *item in items)
+        {
+            [lines addObject:[NSString stringWithFormat:@"%@  pid %@  uid %@",
+                              item[@"name"], item[@"pid"], item[@"uid"]]];
+        }
+        [weakSelf showListWithTitle:@"进程"
+                              lines:lines.count ? lines : @[ @"(无)" ]
+                        monospaced:NO];
+    }];
 
-    NXROMRow *kexts = [NXROMRow new];
-    kexts.title = @"内核扩展 (kext)";
-    kexts.detail = [NSString stringWithFormat:@"%lu", (unsigned long)[NXROMSystemInfo kextCount]];
-    kexts.action = ^(UIViewController *presenter) {
+    NXROMSettingsRow *kexts = [NXROMSettingsRow new];
+    kexts.kind = NXROMSettingsRowKindNavigation;
+    kexts.title = @"内核扩展";
+    kexts.value = [NSString stringWithFormat:@"%lu", (unsigned long)[NXROMSystemInfo kextCount]];
+    kexts.symbolName = @"shippingbox";
+    kexts.tintColor = [UIColor systemPurpleColor];
+    kexts.action = ^(NXROMSettingsViewController *controller) {
         NSArray<NSString *> *identifiers = [NXROMSystemInfo kextIdentifiers];
-        [weakSelf showText:[identifiers count] ? [identifiers componentsJoinedByString:@"\n"] : @"(none)"
-                     title:@"已加载的 kext"];
-    };
+        [weakSelf showListWithTitle:@"内核扩展"
+                              lines:identifiers.count ? identifiers : @[ @"(无)" ]
+                        monospaced:NO];
+    }];
 
-    NXROMRow *ksurfaceRow = [NXROMRow new];
-    ksurfaceRow.title = @"ksurface";
-    ksurfaceRow.detail = [NXROMSystemInfo isKernelAvailable] ? @"已启动" : @"未启动";
+    NXROMSettingsRow *ksurface = [NXROMSettingsRow new];
+    ksurface.kind = NXROMSettingsRowKindValue;
+    ksurface.title = @"ksurface";
+    ksurface.value = [NXROMSystemInfo isKernelAvailable] ? @"已启动" : @"未启动";
+    ksurface.symbolName = @"memorychip";
+    ksurface.tintColor = [UIColor systemIndigoColor];
 
-    /* 用户空间 */
-    NXROMRow *reboot = [NXROMRow new];
+    NXROMSettingsRow *reboot = [NXROMSettingsRow new];
+    reboot.kind = NXROMSettingsRowKindNavigation;
     reboot.title = @"重启用户空间";
-    reboot.detail = @"保留 ksurface";
-    reboot.action = ^(UIViewController *presenter) {
-        [weakSelf confirm:@"重启用户空间？"
-                  message:@"已启动的 guest 进程会被结束。"
-                   action:@"重启"
-                   handle:^{
-            [[PEUserspaceManager shared] rebootUserspace];
-        }];
-    };
+    reboot.value = @"保留 ksurface";
+    reboot.symbolName = @"arrow.clockwise";
+    reboot.tintColor = [UIColor systemOrangeColor];
+    reboot.action = ^(NXROMSettingsViewController *controller) {
+        [weakSelf confirmTitle:@"重启用户空间"
+                        message:@"已启动的 guest 进程会被结束。"
+                         action:@"重启"
+                         handle:^{ [[PEUserspaceManager shared] rebootUserspace]; }];
+    }];
 
-    NXROMRow *daemons = [NXROMRow new];
+    NXROMSettingsRow *daemons = [NXROMSettingsRow new];
+    daemons.kind = NXROMSettingsRowKindNavigation;
     daemons.title = @"重载守护进程";
-    daemons.detail = @"bootstrapd / compilerd";
-    daemons.action = ^(UIViewController *presenter) {
-        [weakSelf confirm:@"重载守护进程？" message:nil action:@"重载" handle:^{
+    daemons.value = @"bootstrapd / compilerd";
+    daemons.symbolName = @"gearshape.2";
+    daemons.tintColor = [UIColor systemTealColor];
+    daemons.action = ^(NXROMSettingsViewController *controller) {
+        [weakSelf confirmTitle:@"重载守护进程" message:nil action:@"重载" handle:^{
             [[PEUserspaceManager shared] reloadDaemons];
         }];
-    };
+    }];
 
-    NXROMRow *restore = [NXROMRow new];
+    NXROMSettingsRow *restore = [NXROMSettingsRow new];
+    restore.kind = NXROMSettingsRowKindNavigation;
     restore.title = @"恢复默认状态";
-    restore.detail = @"清理应用缓存";
-    restore.action = ^(UIViewController *presenter) {
-        [weakSelf confirm:@"恢复默认状态？" message:@"会清理应用缓存，不影响已安装的应用。" action:@"恢复" handle:^{
+    restore.value = @"清理应用缓存";
+    restore.symbolName = @"arrow.counterclockwise";
+    restore.tintColor = [UIColor systemRedColor];
+    restore.action = ^(NXROMSettingsViewController *controller) {
+        [weakSelf confirmTitle:@"恢复默认状态" message:@"会清理应用缓存，不影响已安装的应用。" action:@"恢复" handle:^{
             [[PEUserspaceManager shared] restore];
         }];
-    };
+    }];
 
-    /* 安全 */
-    NXROMRow *mode = [NXROMRow new];
+    NXROMSettingsRow *mode = [NXROMSettingsRow new];
+    mode.kind = NXROMSettingsRowKindNavigation;
     mode.title = @"权限执行模式";
-    mode.detail = [self currentModeTitle];
-    mode.action = ^(UIViewController *presenter) {
+    mode.value = [self modeTitle];
+    mode.symbolName = @"lock.shield";
+    mode.tintColor = [UIColor systemPinkColor];
+    mode.action = ^(NXROMSettingsViewController *controller) {
         [weakSelf chooseEnforcementMode];
     };
 
-    /* kext 开关 */
-    NXROMRow *kextToggle = [NXROMRow new];
+    NXROMSettingsRow *kextToggle = [NXROMSettingsRow new];
+    kextToggle.kind = NXROMSettingsRowKindSwitch;
     kextToggle.title = @"开机加载 kext";
-    kextToggle.isSwitch = YES;
+    kextToggle.symbolName = @"bolt";
+    kextToggle.tintColor = [UIColor systemYellowColor];
     kextToggle.switchKey = kNXROMKextKey;
 
-    /* ROM 自带的 kext */
-    NSArray<NSDictionary *> *romKexts = [NXROMSystemInfo romKexts];
+    NXROMSettingsRow *romKexts = [NXROMSettingsRow new];
+    romKexts.kind = NXROMSettingsRowKindNavigation;
+    romKexts.title = @"ROM 自带 kext";
+    romKexts.symbolName = @"shippingbox.fill";
+    romKexts.tintColor = [UIColor systemBrownColor];
+
+    NSArray<NSDictionary *> *bundledKexts = [NXROMSystemInfo romKexts];
     NSUInteger loadedCount = 0;
-    for(NSDictionary *kext in romKexts)
+    for(NSDictionary *kext in bundledKexts)
     {
         if([kext[@"loaded"] boolValue])
         {
             loadedCount++;
         }
     }
-
-    NXROMRow *romKextRow = [NXROMRow new];
-    romKextRow.title = @"ROM 自带 kext";
-    romKextRow.detail = romKexts.count > 0
-        ? [NSString stringWithFormat:@"%lu/%lu 已加载", (unsigned long)loadedCount, (unsigned long)romKexts.count]
-        : @"没有打包";
-    romKextRow.action = ^(UIViewController *presenter) {
+    romKexts.value = bundledKexts.count > 0
+        ? [NSString stringWithFormat:@"%lu/%lu", (unsigned long)loadedCount, (unsigned long)bundledKexts.count]
+        : @"无";
+    romKexts.action = ^(NXROMSettingsViewController *controller) {
         NSMutableArray<NSString *> *lines = [NSMutableArray array];
-        for(NSDictionary *kext in romKexts)
+        for(NSDictionary *kext in bundledKexts)
         {
             [lines addObject:[NSString stringWithFormat:@"%@  %@\n%@",
-                              [kext[@"loaded"] boolValue] ? @"✓" : @"·",
-                              kext[@"bundle"],
-                              kext[@"identifier"]]];
+                              [kext[@"loaded"] boolValue] ? @"已加载" : @"未加载",
+                              kext[@"bundle"], kext[@"identifier"]]];
         }
-        [weakSelf showText:lines.count ? [lines componentsJoinedByString:@"\n\n"] : @"ROM 里没有 kexts/ 目录"
-                     title:@"ROM kext"];
-    };
+        [weakSelf showListWithTitle:@"ROM kext" lines:lines.count ? lines : @[ @"(无)" ] monospaced:NO];
+    }];
 
-    /* 诊断 */
-    NXROMRow *log = [NXROMRow new];
+    NXROMSettingsRow *log = [NXROMSettingsRow new];
+    log.kind = NXROMSettingsRowKindNavigation;
     log.title = @"内核日志";
-    log.action = ^(UIViewController *presenter) {
-        NXROMLogViewController *controller = [[NXROMLogViewController alloc] init];
-        [presenter.navigationController pushViewController:controller animated:YES];
-    };
+    log.symbolName = @"text.alignleft";
+    log.tintColor = [UIColor systemGrayColor];
+    log.action = ^(NXROMSettingsViewController *controller) {
+        NSString *dump = klog_dump() ?: @"";
+        NSArray<NSString *> *lines = [dump componentsSeparatedByString:@"\n"];
+        NSMutableArray<NSString *> *trimmed = [NSMutableArray array];
+        for(NSString *line in lines)
+        {
+            if(line.length > 0)
+            {
+                [trimmed addObject:line];
+            }
+        }
+        [weakSelf showListWithTitle:@"内核日志"
+                              lines:trimmed.count ? trimmed : @[ @"(空)" ]
+                        monospaced:YES];
+    }];
 
-    NXROMRow *apps = [NXROMRow new];
-    apps.title = @"已安装应用";
-    apps.detail = [NSString stringWithFormat:@"%lu", (unsigned long)[[NXROMAppRegistry shared] reload].count];
-    apps.action = ^(UIViewController *presenter) {
+    NXROMSettingsRow *apps = [NXROMSettingsRow new];
+    apps.kind = NXROMSettingsRowKindNavigation;
+    apps.title = @"应用";
+    apps.value = [NSString stringWithFormat:@"%lu", (unsigned long)[[NXROMAppRegistry shared] reload].count];
+    apps.symbolName = @"square.grid.2x2";
+    apps.tintColor = [UIColor systemBlueColor];
+    apps.action = ^(NXROMSettingsViewController *controller) {
         NSMutableArray<NSString *> *lines = [NSMutableArray array];
         for(NXROMApplication *application in [NXROMAppRegistry shared].applications)
         {
-            [lines addObject:[NSString stringWithFormat:@"%@  (%@)\n%@",
+            [lines addObject:[NSString stringWithFormat:@"%@\n%@  (%@)",
                               application.displayName,
                               application.bundleIdentifier,
-                              application.executablePath]];
+                              application.kind == NXROMAppKindBuiltin ? @"系统" : @"guest"]];
         }
-        [weakSelf showText:[lines count] ? [lines componentsJoinedByString:@"\n\n"] : @"(none)" title:@"应用"];
-    };
+        [weakSelf showListWithTitle:@"应用" lines:lines.count ? lines : @[ @"(无)" ] monospaced:NO];
+    }];
 
-    /* 关于 */
-    NXROMRow *version = [NXROMRow new];
-    version.title = @"ROM";
-    version.detail = @"0.1.0 (custom)";
+    NXROMSettingsRow *version = [NXROMSettingsRow new];
+    version.kind = NXROMSettingsRowKindValue;
+    version.title = @"ROM 版本";
+    version.value = @"0.2.0";
+    version.symbolName = @"info.circle";
+    version.tintColor = [UIColor systemGrayColor];
 
-    NXROMRow *device = [NXROMRow new];
-    device.title = @"设备";
-    device.detail = [NSString stringWithFormat:@"%@ · iOS %@",
-                     UIDevice.currentDevice.model,
-                     UIDevice.currentDevice.systemVersion];
-
-    self.sectionTitles = @[ @"系统", @"用户空间", @"安全", @"内核扩展", @"诊断", @"关于" ];
+    self.sectionTitles = @[ @"设备", @"系统", @"用户空间", @"安全", @"启动", @"诊断", @"关于" ];
     self.sections = @[
-        @[ hostname, processes, kexts, ksurfaceRow ],
+        @[ device ],
+        @[ hostname, processes, kexts, ksurface ],
         @[ reboot, daemons, restore ],
         @[ mode ],
-        @[ kextToggle, romKextRow ],
+        @[ kextToggle, romKexts ],
         @[ log, apps ],
-        @[ version, device ],
+        @[ version ],
     ];
 }
 
-- (NSString *)currentModeTitle
+#pragma mark - 展示
+
+- (void)showListWithTitle:(NSString *)title lines:(NSArray<NSString *> *)lines monospaced:(BOOL)monospaced
+{
+    NXROMListViewController *list = [[NXROMListViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    list.title = title;
+    list.header = title;
+    list.lines = lines;
+    list.monospaced = monospaced;
+    [self.navigationController pushViewController:list animated:YES];
+}
+
+- (void)confirmTitle:(NSString *)title
+             message:(nullable NSString *)message
+              action:(NSString *)action
+              handle:(void (^)(void))handle
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                  message:message
+                                                           preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:action style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        handle();
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (NSString *)modeTitle
 {
     NSString *mode = [NSUserDefaults.standardUserDefaults stringForKey:kNXROMModeKey];
     if([mode isEqualToString:@"permissive"])
@@ -283,10 +352,12 @@ static NSString *const kNXROMKextKey = @"nyxian.boot.kextLoading";
     NSArray<NSString *> *modes = @[ @"enforcing", @"permissive", @"disabled" ];
     NSArray<NSString *> *titles = @[ @"Enforcing（默认）", @"Permissive（放行并记录）", @"Disabled（不检查）" ];
 
-    for(NSUInteger i = 0; i < modes.count; i++)
+    for(NSUInteger index = 0; index < modes.count; index++)
     {
-        NSString *mode = modes[i];
-        [sheet addAction:[UIAlertAction actionWithTitle:titles[i] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        NSString *mode = modes[index];
+        [sheet addAction:[UIAlertAction actionWithTitle:titles[index]
+                                                 style:UIAlertActionStyleDefault
+                                               handler:^(UIAlertAction *action) {
             [NSUserDefaults.standardUserDefaults setObject:mode forKey:kNXROMModeKey];
 
             PEEnforcementMode enforcement = kPEEnforcementModeEnforcing;
@@ -299,7 +370,6 @@ static NSString *const kNXROMKextKey = @"nyxian.boot.kextLoading";
                 enforcement = kPEEnforcementModeDisabled;
             }
             trust_enforcement_set_mode(enforcement);
-
             [self.tableView reloadData];
         }]];
     }
@@ -307,58 +377,11 @@ static NSString *const kNXROMKextKey = @"nyxian.boot.kextLoading";
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView = self.view;
     sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
-                                                               CGRectGetMidY(self.view.bounds),
-                                                               1.0, 1.0);
+                                                               CGRectGetMidY(self.view.bounds), 1, 1);
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
-#pragma mark - 展示辅助
-
-- (void)confirm:(NSString *)title
-        message:(nullable NSString *)message
-         action:(NSString *)action
-         handle:(void (^)(void))handle
-{
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
-                                                                  message:message
-                                                           preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:action style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
-        handle();
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (void)showText:(NSString *)text title:(NSString *)title
-{
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
-                                                                  message:text
-                                                           preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (void)showList:(NSArray<NSDictionary *> *)items
-           title:(NSString *)title
-            keys:(NSArray<NSString *> *)keys
-         formats:(NSArray<NSString *> *)formats
-{
-    NSMutableArray<NSString *> *lines = [NSMutableArray array];
-    for(NSDictionary *item in items)
-    {
-        NSMutableArray<NSString *> *parts = [NSMutableArray array];
-        for(NSUInteger i = 0; i < keys.count && i < formats.count; i++)
-        {
-            id value = item[keys[i]] ?: @"?";
-            [parts addObject:[NSString stringWithFormat:formats[i], value]];
-        }
-        [lines addObject:[parts componentsJoinedByString:@"  "]];
-    }
-
-    [self showText:[lines count] ? [lines componentsJoinedByString:@"\n"] : @"(none)" title:title];
-}
-
-#pragma mark - Table
+#pragma mark - 表格
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
@@ -377,57 +400,93 @@ static NSString *const kNXROMKextKey = @"nyxian.boot.kextLoading";
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    NXROMRow *row = self.sections[(NSUInteger)indexPath.section][(NSUInteger)indexPath.row];
-
-    if(row.isSwitch)
-    {
-        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"switch"];
-        if(cell == nil)
-        {
-            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"switch"];
-            UISwitch *toggle = [[UISwitch alloc] init];
-            [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
-            cell.accessoryView = toggle;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        }
-
-        UISwitch *toggle = (UISwitch *)cell.accessoryView;
-        toggle.on = [NSUserDefaults.standardUserDefaults boolForKey:row.switchKey];
-        cell.textLabel.text = row.title;
-        return cell;
-    }
-
+    NXROMSettingsRow *row = self.sections[(NSUInteger)indexPath.section][(NSUInteger)indexPath.row];
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"row"];
     if(cell == nil)
     {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"row"];
+        cell.textLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightRegular];
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightRegular];
+        cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     }
 
     cell.textLabel.text = row.title;
-    cell.detailTextLabel.text = row.detail;
-    cell.accessoryType = row.action != nil ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
-    cell.selectionStyle = row.action != nil ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
+    cell.detailTextLabel.text = row.value;
+
+    if(row.symbolName.length > 0)
+    {
+        cell.imageView.image = [self tileImageForRow:row];
+        cell.imageView.contentMode = UIViewContentModeScaleAspectFit;
+    }
+    else
+    {
+        cell.imageView.image = nil;
+    }
+
+    if(row.kind == NXROMSettingsRowKindSwitch)
+    {
+        UISwitch *toggle = self.switches[row.switchKey];
+        if(toggle == nil)
+        {
+            toggle = [[UISwitch alloc] init];
+            toggle.onTintColor = [UIColor systemGreenColor];
+            [toggle addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
+            self.switches[row.switchKey] = toggle;
+        }
+        toggle.on = [NSUserDefaults.standardUserDefaults boolForKey:row.switchKey];
+        cell.accessoryView = toggle;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+    }
+    else
+    {
+        cell.accessoryView = nil;
+        cell.accessoryType = row.kind == NXROMSettingsRowKindNavigation
+            ? UITableViewCellAccessoryDisclosureIndicator
+            : UITableViewCellAccessoryNone;
+        cell.selectionStyle = row.kind == NXROMSettingsRowKindNavigation
+            ? UITableViewCellSelectionStyleDefault
+            : UITableViewCellSelectionStyleNone;
+    }
+
     return cell;
+}
+
+- (UIImage *)tileImageForRow:(NXROMSettingsRow *)row
+{
+    CGFloat size = NXROMSymbolTileSize;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(size, size)];
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        CGRect rect = CGRectMake(0, 0, size, size);
+        UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:rect cornerRadius:NXROMSymbolTileCornerRadius];
+        [(row.tintColor ?: UIColor.systemGrayColor) setFill];
+        [path fill];
+
+        UIImage *symbol = [UIImage systemImageNamed:row.symbolName];
+        symbol = [symbol imageByApplyingSymbolConfiguration:
+                  [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightSemibold]];
+        CGSize symbolSize = symbol.size;
+        [symbol drawInRect:CGRectMake((size - symbolSize.width) / 2.0, (size - symbolSize.height) / 2.0,
+                                      symbolSize.width, symbolSize.height)];
+    }];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-    NXROMRow *row = self.sections[(NSUInteger)indexPath.section][(NSUInteger)indexPath.row];
+    NXROMSettingsRow *row = self.sections[(NSUInteger)indexPath.section][(NSUInteger)indexPath.row];
     if(row.action != nil)
     {
         row.action(self);
     }
 }
 
-- (void)toggleChanged:(UISwitch *)sender
+- (void)switchChanged:(UISwitch *)sender
 {
-    /* 只有一个 switch，key 固定 */
     [NSUserDefaults.standardUserDefaults setBool:sender.isOn forKey:kNXROMKextKey];
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"需要重启用户空间"
-                                                                  message:@"kext 加载开关在下次 boot 生效。"
+                                                                  message:@"kext 加载开关在下次启动生效。"
                                                            preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"现在重启" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
         [[PEUserspaceManager shared] rebootUserspace];

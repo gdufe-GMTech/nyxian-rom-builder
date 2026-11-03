@@ -1,122 +1,239 @@
 /*
  * NXROMHomeViewController.m
+ *
+ * 结构：壁纸 + 横向分页容器（每页 4x6 图标）+ 胶囊页点 + 毛玻璃 Dock。
+ * 不使用 UICollectionView：流式布局在横向分页下会按列铺满，与行优先顺序不符。
  */
 
+
 #import "NXROMHomeViewController.h"
-#import "NXROMAppRegistry.h"
+#import "NXROMDesign.h"
 
-#import <LindChain/ProcEnvironment/Surface/libkern/klog.h>
+@class NXROMFolderViewController;
 
-@interface NXROMAppCell : UICollectionViewCell
-@property (nonatomic, strong) UIImageView *iconView;
-@property (nonatomic, strong) UILabel *titleLabel;
-@property (nonatomic, strong) UIView *iconBackground;
-@property (nonatomic, strong) UILabel *fallbackLabel;
-- (void)configureWithApplication:(NXROMApplication *)application;
+#include <math.h>
+#include <stdlib.h>
+
+#pragma mark - 图标
+
+@class NXROMIconView;
+
+@protocol NXROMIconViewDelegate <NSObject>
+- (void)iconViewWasTapped:(NXROMIconView *)iconView;
 @end
 
-@implementation NXROMAppCell
+@interface NXROMIconView : UIControl
+
+@property (nonatomic, strong) UIImageView *iconView;
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) NXROMApplication *application;
+@property (nonatomic, weak) id<NXROMIconViewDelegate> delegate;
+@property (nonatomic, assign, getter=isEditing) BOOL editing;
+
+- (instancetype)initWithApplication:(NXROMApplication *)application iconSize:(CGFloat)iconSize;
+
+@end
+
+@implementation NXROMIconView
+
+- (instancetype)initWithApplication:(NXROMApplication *)application iconSize:(CGFloat)iconSize
+{
+    self = [super initWithFrame:CGRectZero];
+    if(self)
+    {
+        _application = application;
+
+        _iconView = [NXROMDesign iconViewWithImage:application.icon title:application.displayName size:iconSize];
+        _iconView.userInteractionEnabled = NO;
+        [self addSubview:_iconView];
+
+        _titleLabel = [UILabel new];
+        _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        _titleLabel.text = application.displayName;
+        _titleLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium];
+        _titleLabel.textColor = UIColor.whiteColor;
+        _titleLabel.textAlignment = NSTextAlignmentCenter;
+        _titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+        _titleLabel.layer.shadowColor = UIColor.blackColor.CGColor;
+        _titleLabel.layer.shadowOpacity = 0.35;
+        _titleLabel.layer.shadowRadius = 2.0;
+        _titleLabel.layer.shadowOffset = CGSizeMake(0, 1);
+        [self addSubview:_titleLabel];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_iconView.topAnchor constraintEqualToAnchor:self.topAnchor],
+            [_iconView.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
+            [_iconView.widthAnchor constraintEqualToConstant:iconSize],
+            [_iconView.heightAnchor constraintEqualToConstant:iconSize],
+
+            [_titleLabel.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:6.0],
+            [_titleLabel.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:-4.0],
+            [_titleLabel.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:4.0],
+        ]];
+
+        [self addTarget:self action:@selector(handleTap) forControlEvents:UIControlEventTouchUpInside];
+    }
+    return self;
+}
+
+- (void)handleTap
+{
+    [UIView animateWithDuration:0.12
+                          delay:0
+                        options:UIViewAnimationOptionCurveEaseOut
+                     animations:^{
+        self.iconView.transform = CGAffineTransformMakeScale(0.88, 0.88);
+    }
+                     completion:^(BOOL finished) {
+        [UIView animateWithDuration:0.18 animations:^{
+            self.iconView.transform = CGAffineTransformIdentity;
+        }];
+    }];
+
+    [self.delegate iconViewWasTapped:self];
+}
+
+- (void)setHighlighted:(BOOL)highlighted
+{
+    [super setHighlighted:highlighted];
+    if(self.isEditing)
+    {
+        return;
+    }
+    [UIView animateWithDuration:0.1 animations:^{
+        self.transform = highlighted ? CGAffineTransformMakeScale(0.94, 0.94) : CGAffineTransformIdentity;
+    }];
+}
+
+
+- (void)setEditing:(BOOL)editing
+{
+    _editing = editing;
+
+    if(editing)
+    {
+        static NSString *const key = @"nxrom.wiggle";
+        if([self.layer animationForKey:key] == nil)
+        {
+            CABasicAnimation *animation = [CABasicAnimation animationWithKeyPath:@"transform.rotation.z"];
+            animation.fromValue = @(-0.022);
+            animation.toValue = @(0.022);
+            animation.duration = 0.13;
+            animation.autoreverses = YES;
+            animation.repeatCount = HUGE_VALF;
+            animation.beginTime = CACurrentMediaTime() + (arc4random_uniform(100) / 1000.0);
+            [self.layer addAnimation:animation forKey:key];
+        }
+    }
+    else
+    {
+        [self.layer removeAllAnimations];
+        self.transform = CGAffineTransformIdentity;
+    }
+}
+
+@end
+
+#pragma mark - 页
+@interface NXROMPageView : UIView
+@property (nonatomic, copy) NSArray<NXROMApplication *> *applications;
+@property (nonatomic, weak) id<NXROMIconViewDelegate> delegate;
+@property (nonatomic, assign, getter=isEditing) BOOL editing;
+- (void)setApplications:(NSArray<NXROMApplication *> *)applications;
+@end
+
+@implementation NXROMPageView
+{
+    NSMutableArray<NXROMIconView *> *_icons;
+}
 
 - (instancetype)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
     if(self)
     {
-        _iconBackground = [[UIView alloc] init];
-        _iconBackground.translatesAutoresizingMaskIntoConstraints = NO;
-        _iconBackground.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.14];
-        _iconBackground.layer.cornerRadius = 15.0;
-        _iconBackground.layer.cornerCurve = kCACornerCurveContinuous;
-        _iconBackground.clipsToBounds = YES;
-        [self.contentView addSubview:_iconBackground];
-
-        _iconView = [[UIImageView alloc] init];
-        _iconView.translatesAutoresizingMaskIntoConstraints = NO;
-        _iconView.contentMode = UIViewContentModeScaleAspectFill;
-        _iconView.clipsToBounds = YES;
-        _iconView.layer.cornerRadius = 15.0;
-        _iconView.layer.cornerCurve = kCACornerCurveContinuous;
-        [_iconBackground addSubview:_iconView];
-
-        _fallbackLabel = [[UILabel alloc] init];
-        _fallbackLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        _fallbackLabel.font = [UIFont systemFontOfSize:30.0 weight:UIFontWeightSemibold];
-        _fallbackLabel.textAlignment = NSTextAlignmentCenter;
-        _fallbackLabel.textColor = UIColor.whiteColor;
-        [_iconBackground addSubview:_fallbackLabel];
-
-        _titleLabel = [[UILabel alloc] init];
-        _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        _titleLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium];
-        _titleLabel.textAlignment = NSTextAlignmentCenter;
-        _titleLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.92];
-        _titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-        [self.contentView addSubview:_titleLabel];
-
-        [NSLayoutConstraint activateConstraints:@[
-            [_iconBackground.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor],
-            [_iconBackground.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:2.0],
-            [_iconBackground.widthAnchor constraintEqualToConstant:62.0],
-            [_iconBackground.heightAnchor constraintEqualToConstant:62.0],
-
-            [_iconView.leadingAnchor constraintEqualToAnchor:_iconBackground.leadingAnchor],
-            [_iconView.trailingAnchor constraintEqualToAnchor:_iconBackground.trailingAnchor],
-            [_iconView.topAnchor constraintEqualToAnchor:_iconBackground.topAnchor],
-            [_iconView.bottomAnchor constraintEqualToAnchor:_iconBackground.bottomAnchor],
-
-            [_fallbackLabel.centerXAnchor constraintEqualToAnchor:_iconBackground.centerXAnchor],
-            [_fallbackLabel.centerYAnchor constraintEqualToAnchor:_iconBackground.centerYAnchor],
-
-            [_titleLabel.topAnchor constraintEqualToAnchor:_iconBackground.bottomAnchor constant:5.0],
-            [_titleLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:-2.0],
-            [_titleLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:2.0],
-        ]];
+        _icons = [NSMutableArray array];
+        _applications = @[];
     }
     return self;
 }
 
-- (void)configureWithApplication:(NXROMApplication *)application
+- (void)setApplications:(NSArray<NXROMApplication *> *)applications
 {
-    self.titleLabel.text = application.displayName;
-    self.iconView.image = application.icon;
-    self.fallbackLabel.hidden = (application.icon != nil);
-    self.fallbackLabel.text = application.displayName.length > 0
-        ? [application.displayName substringToIndex:1].uppercaseString
-        : @"?";
+    _applications = [applications copy];
+
+    for(NXROMIconView *icon in _icons)
+    {
+        [icon removeFromSuperview];
+    }
+    [_icons removeAllObjects];
+
+    for(NXROMApplication *application in applications)
+    {
+        NXROMIconView *icon = [[NXROMIconView alloc] initWithApplication:application iconSize:NXROMIconSize];
+        icon.delegate = self.delegate;
+        icon.editing = self.isEditing;
+        [self addSubview:icon];
+        [_icons addObject:icon];
+    }
+
+    [self setNeedsLayout];
 }
 
-- (void)setHighlighted:(BOOL)highlighted
+- (void)setEditing:(BOOL)editing
 {
-    [super setHighlighted:highlighted];
-    [UIView animateWithDuration:0.12 animations:^{
-        self.iconBackground.transform = highlighted
-            ? CGAffineTransformMakeScale(0.9, 0.9)
-            : CGAffineTransformIdentity;
-    }];
+    _editing = editing;
+    for(NXROMIconView *icon in _icons)
+    {
+        icon.editing = editing;
+    }
+}
+
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+
+    const NSUInteger columns = 4;
+    const NSUInteger rows = 6;
+    CGFloat width = CGRectGetWidth(self.bounds);
+    CGFloat height = CGRectGetHeight(self.bounds);
+
+    CGFloat horizontalInset = 18.0;
+    CGFloat verticalInset = 8.0;
+    CGFloat columnWidth = (width - horizontalInset * 2.0) / (CGFloat)columns;
+    CGFloat rowHeight = (height - verticalInset * 2.0) / (CGFloat)rows;
+
+    for(NSUInteger index = 0; index < _icons.count; index++)
+    {
+        NSUInteger column = index % columns;
+        NSUInteger row = index / columns;
+
+        CGFloat x = horizontalInset + columnWidth * (CGFloat)column;
+        CGFloat y = verticalInset + rowHeight * (CGFloat)row;
+
+        NXROMIconView *icon = _icons[index];
+        CGRect frame = CGRectMake(x, y, columnWidth, rowHeight);
+        icon.frame = frame;
+        [icon setNeedsLayout];
+        [icon layoutIfNeeded];
+    }
 }
 
 @end
 
-#pragma mark -
+#pragma mark - 主屏
 
-@interface NXROMHomeViewController () <UICollectionViewDataSource, UICollectionViewDelegateFlowLayout>
+@interface NXROMHomeViewController () <UIScrollViewDelegate, NXROMIconViewDelegate, UIGestureRecognizerDelegate>
 
-@property (nonatomic, strong) UICollectionView *collectionView;
-@property (nonatomic, strong) UIView *dockView;
-@property (nonatomic, strong) UILabel *clockLabel;
-@property (nonatomic, strong) UILabel *hostLabel;
-@property (nonatomic, strong) NSTimer *clockTimer;
+@property (nonatomic, strong) UIScrollView *pagingScrollView;
+@property (nonatomic, strong) UIView *pagesContainer;
+@property (nonatomic, strong) NSMutableArray<NXROMPageView *> *pages;
+@property (nonatomic, strong) UIView *pagePill;
+@property (nonatomic, strong) NSMutableArray<UIView *> *pageDots;
+@property (nonatomic, strong) UIView *dock;
 @property (nonatomic, strong) NSArray<NXROMApplication *> *applications;
-@property (nonatomic, strong) CAGradientLayer *wallpaperLayer;
-
-- (void)buildWallpaper;
-- (void)buildStatusBar;
-- (void)buildCollectionView;
-- (void)buildDock;
-- (UIButton *)dockButtonWithSymbol:(NSString *)symbol action:(SEL)action;
-- (void)startClock;
-- (void)updateClock;
-- (nullable NXROMApplication *)firstApplicationWithIdentifierPrefix:(NSString *)prefix;
+@property (nonatomic, assign, getter=isEditing) BOOL editing;
+@property (nonatomic, strong) UILongPressGestureRecognizer *longPress;
 
 @end
 
@@ -126,158 +243,160 @@
 {
     [super viewDidLoad];
 
-    [self buildWallpaper];
-    [self buildStatusBar];
-    [self buildCollectionView];
+    [NXROMDesign applyWallpaperToView:self.view];
+
     [self buildDock];
+    [self buildPagePill];
+
+    self.pagingScrollView = [UIScrollView new];
+    self.pagingScrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.pagingScrollView.pagingEnabled = YES;
+    self.pagingScrollView.showsHorizontalScrollIndicator = NO;
+    self.pagingScrollView.showsVerticalScrollIndicator = NO;
+    self.pagingScrollView.alwaysBounceHorizontal = NO;
+    self.pagingScrollView.alwaysBounceVertical = NO;
+    self.pagingScrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+    self.pagingScrollView.delegate = self;
+    [self.view addSubview:self.pagingScrollView];
+
+    self.pagesContainer = [UIView new];
+    self.pagesContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.pagingScrollView addSubview:self.pagesContainer];
+
+    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [self.pagingScrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.pagingScrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.pagingScrollView.topAnchor constraintEqualToAnchor:safe.topAnchor],
+        [self.pagingScrollView.bottomAnchor constraintEqualToAnchor:self.pagePill.topAnchor constant:-4.0],
+
+        [self.pagesContainer.leadingAnchor constraintEqualToAnchor:self.pagingScrollView.leadingAnchor],
+        [self.pagesContainer.trailingAnchor constraintEqualToAnchor:self.pagingScrollView.trailingAnchor],
+        [self.pagesContainer.topAnchor constraintEqualToAnchor:self.pagingScrollView.topAnchor],
+        [self.pagesContainer.heightAnchor constraintEqualToAnchor:self.pagingScrollView.heightAnchor],
+    ]];
+
+    self.longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+    self.longPress.minimumPressDuration = 0.6;
+    self.longPress.delegate = self;
+    [self.view addGestureRecognizer:self.longPress];
 
     [self reloadApplications];
-    [self startClock];
 }
 
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
-    self.wallpaperLayer.frame = self.view.bounds;
+    [self layoutPages];
 }
 
-#pragma mark - 外观
-
-- (void)buildWallpaper
-{
-    self.wallpaperLayer = [CAGradientLayer layer];
-    self.wallpaperLayer.colors = @[
-        (id)[UIColor colorWithRed:0.05 green:0.06 blue:0.10 alpha:1.0].CGColor,
-        (id)[UIColor colorWithRed:0.10 green:0.09 blue:0.20 alpha:1.0].CGColor,
-        (id)[UIColor colorWithRed:0.20 green:0.12 blue:0.28 alpha:1.0].CGColor,
-    ];
-    self.wallpaperLayer.startPoint = CGPointMake(0.1, 0.0);
-    self.wallpaperLayer.endPoint = CGPointMake(0.9, 1.0);
-    [self.view.layer addSublayer:self.wallpaperLayer];
-}
-
-- (void)buildStatusBar
-{
-    self.clockLabel = [[UILabel alloc] init];
-    self.clockLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.clockLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
-    self.clockLabel.textColor = UIColor.whiteColor;
-    self.clockLabel.alpha = 0.9;
-
-    self.hostLabel = [[UILabel alloc] init];
-    self.hostLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.hostLabel.font = [UIFont systemFontOfSize:12.5 weight:UIFontWeightMedium];
-    self.hostLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.55];
-    self.hostLabel.text = [[NSProcessInfo processInfo] hostName];
-
-    [self.view addSubview:self.clockLabel];
-    [self.view addSubview:self.hostLabel];
-
-    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
-    [NSLayoutConstraint activateConstraints:@[
-        [self.clockLabel.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:22.0],
-        [self.clockLabel.topAnchor constraintEqualToAnchor:safe.topAnchor constant:6.0],
-
-        [self.hostLabel.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-22.0],
-        [self.hostLabel.centerYAnchor constraintEqualToAnchor:self.clockLabel.centerYAnchor],
-    ]];
-}
-
-- (void)buildCollectionView
-{
-    UICollectionViewFlowLayout *layout = [[UICollectionViewFlowLayout alloc] init];
-    layout.itemSize = CGSizeMake(74.0, 92.0);
-    layout.minimumInteritemSpacing = 12.0;
-    layout.minimumLineSpacing = 20.0;
-    layout.sectionInset = UIEdgeInsetsMake(18.0, 20.0, 18.0, 20.0);
-
-    self.collectionView = [[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:layout];
-    self.collectionView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.collectionView.backgroundColor = UIColor.clearColor;
-    self.collectionView.dataSource = self;
-    self.collectionView.delegate = self;
-    self.collectionView.showsVerticalScrollIndicator = NO;
-    self.collectionView.alwaysBounceVertical = YES;
-    [self.collectionView registerClass:NXROMAppCell.class forCellWithReuseIdentifier:@"app"];
-    [self.view addSubview:self.collectionView];
-
-    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
-    [NSLayoutConstraint activateConstraints:@[
-        [self.collectionView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.collectionView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.collectionView.topAnchor constraintEqualToAnchor:self.clockLabel.bottomAnchor constant:8.0],
-        [self.collectionView.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-104.0],
-    ]];
-}
+#pragma mark - 构件
 
 - (void)buildDock
 {
-    UIBlurEffect *effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-    UIVisualEffectView *dock = [[UIVisualEffectView alloc] initWithEffect:effect];
+    UIVisualEffectView *dock = [NXROMDesign blurViewWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark
+                                                 cornerRadius:NXROMDockCornerRadius];
     dock.translatesAutoresizingMaskIntoConstraints = NO;
-    dock.layer.cornerRadius = 27.0;
-    dock.layer.cornerCurve = kCACornerCurveContinuous;
-    dock.clipsToBounds = YES;
 
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[
-        [self dockButtonWithSymbol:@"gearshape.fill" action:@selector(settingsTapped)],
-        [self dockButtonWithSymbol:@"folder.fill" action:@selector(filesTapped)],
-        [self dockButtonWithSymbol:@"iphone.app.switcher" action:@selector(switcherTapped)],
-        [self dockButtonWithSymbol:@"chevron.left.forwardslash.chevron.right" action:@selector(debugTapped)],
-    ]];
+    UIStackView *stack = [UIStackView new];
     stack.translatesAutoresizingMaskIntoConstraints = NO;
     stack.axis = UILayoutConstraintAxisHorizontal;
     stack.distribution = UIStackViewDistributionEqualSpacing;
     stack.alignment = UIStackViewAlignmentCenter;
-
     [dock.contentView addSubview:stack];
+
     [self.view addSubview:dock];
+    self.dock = dock;
+    self.dock.accessibilityLabel = @"dock";
 
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [dock.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:18.0],
-        [dock.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-18.0],
+        [dock.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:14.0],
+        [dock.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-14.0],
         [dock.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-10.0],
-        [dock.heightAnchor constraintEqualToConstant:74.0],
+        [dock.heightAnchor constraintEqualToConstant:96.0],
 
-        [stack.leadingAnchor constraintEqualToAnchor:dock.contentView.leadingAnchor constant:22.0],
-        [stack.trailingAnchor constraintEqualToAnchor:dock.contentView.trailingAnchor constant:-22.0],
+        [stack.leadingAnchor constraintEqualToAnchor:dock.contentView.leadingAnchor constant:18.0],
+        [stack.trailingAnchor constraintEqualToAnchor:dock.contentView.trailingAnchor constant:-18.0],
         [stack.centerYAnchor constraintEqualToAnchor:dock.contentView.centerYAnchor],
+        [stack.heightAnchor constraintEqualToConstant:NXROMIconSize],
     ]];
-
-    self.dockView = dock;
 }
 
-- (UIButton *)dockButtonWithSymbol:(NSString *)symbol action:(SEL)action
+- (void)buildPagePill
 {
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    UIImage *image = [UIImage systemImageNamed:symbol];
-    [button setImage:image forState:UIControlStateNormal];
-    button.tintColor = UIColor.whiteColor;
-    button.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:25.0 weight:UIImageSymbolWeightMedium];
-    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
-    [button.widthAnchor constraintEqualToConstant:54.0].active = YES;
-    [button.heightAnchor constraintEqualToConstant:54.0].active = YES;
-    return button;
+    self.pagePill = [UIView new];
+    self.pagePill.translatesAutoresizingMaskIntoConstraints = NO;
+    self.pagePill.backgroundColor = [UIColor colorWithWhite:0.15 alpha:0.32];
+    self.pagePill.layer.cornerRadius = 12.0;
+    self.pagePill.layer.cornerCurve = kCACornerCurveContinuous;
+    self.pagePill.userInteractionEnabled = NO;
+    [self.view addSubview:self.pagePill];
+
+    self.pageDots = [NSMutableArray array];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [self.pagePill.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [self.pagePill.bottomAnchor constraintEqualToAnchor:self.dock.topAnchor constant:-10.0],
+        [self.pagePill.heightAnchor constraintEqualToConstant:24.0],
+        [self.pagePill.widthAnchor constraintGreaterThanOrEqualToConstant:36.0],
+    ]];
 }
 
-#pragma mark - 时钟
-
-- (void)startClock
+/* 页点为胶囊内的圆点，数量随页数重建 */
+- (void)rebuildPageDots:(NSUInteger)pageCount
 {
-    [self updateClock];
-    self.clockTimer = [NSTimer scheduledTimerWithTimeInterval:15.0
-                                                       target:self
-                                                     selector:@selector(updateClock)
-                                                     userInfo:nil
-                                                      repeats:YES];
+    for(UIView *dot in self.pageDots)
+    {
+        [dot removeFromSuperview];
+    }
+    [self.pageDots removeAllObjects];
+
+    const CGFloat dotSize = 7.0;
+    const CGFloat spacing = 10.0;
+
+    for(NSUInteger index = 0; index < pageCount; index++)
+    {
+        UIView *dot = [UIView new];
+        dot.translatesAutoresizingMaskIntoConstraints = NO;
+        dot.layer.cornerRadius = dotSize / 2.0;
+        dot.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.35];
+        [self.pagePill addSubview:dot];
+        [self.pageDots addObject:dot];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [dot.widthAnchor constraintEqualToConstant:dotSize],
+            [dot.heightAnchor constraintEqualToConstant:dotSize],
+            [dot.centerYAnchor constraintEqualToAnchor:self.pagePill.centerYAnchor],
+        ]];
+    }
+
+    /* 姘村钩灞呬腑鎺掑竷 */
+    CGFloat totalWidth = dotSize * (CGFloat)pageCount + spacing * (CGFloat)(pageCount - 1);
+    if(pageCount == 0)
+    {
+        return;
+    }
+
+    for(NSUInteger index = 0; index < self.pageDots.count; index++)
+    {
+        UIView *dot = self.pageDots[index];
+        CGFloat centerX = -totalWidth / 2.0 + dotSize / 2.0 + (dotSize + spacing) * (CGFloat)index;
+        [dot.centerXAnchor constraintEqualToAnchor:self.pagePill.centerXAnchor constant:centerX].active = YES;
+    }
+
+    [self.pagePill.widthAnchor constraintEqualToConstant:MAX(36.0, totalWidth + 22.0)].active = YES;
+    [self updatePageDots:0];
 }
 
-- (void)updateClock
+- (void)updatePageDots:(NSInteger)page
 {
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    formatter.dateFormat = @"HH:mm";
-    self.clockLabel.text = [formatter stringFromDate:NSDate.date];
+    for(NSUInteger index = 0; index < self.pageDots.count; index++)
+    {
+        self.pageDots[index].backgroundColor = ((NSInteger)index == page)
+            ? [UIColor colorWithWhite:1.0 alpha:0.95]
+            : [UIColor colorWithWhite:1.0 alpha:0.35];
+    }
 }
 
 #pragma mark - 数据
@@ -285,99 +404,325 @@
 - (void)reloadApplications
 {
     self.applications = [[NXROMAppRegistry shared] reload];
-    [self.collectionView reloadData];
-}
 
-- (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section
-{
-    return (NSInteger)self.applications.count;
-}
+    NSMutableArray<NXROMApplication *> *dockApps = [NSMutableArray array];
+    NSMutableArray<NXROMApplication *> *gridApps = [NSMutableArray array];
 
-- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath
-{
-    NXROMAppCell *cell = (NXROMAppCell *)[collectionView dequeueReusableCellWithReuseIdentifier:@"app" forIndexPath:indexPath];
-    [cell configureWithApplication:self.applications[(NSUInteger)indexPath.item]];
-    return cell;
-}
-
-- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath
-{
-    [collectionView deselectItemAtIndexPath:indexPath animated:NO];
-
-    NXROMApplication *application = self.applications[(NSUInteger)indexPath.item];
-    pid_t pid = [[NXROMAppRegistry shared] launchApplication:application];
-    if(pid < 0)
+    for(NXROMApplication *application in self.applications)
     {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"启动失败"
-                                                                       message:[NSString stringWithFormat:@"%@ 没能被拉起，看 Settings → 内核日志。", application.displayName]
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        if(application.kind == NXROMAppKindBuiltin && dockApps.count < 4)
+        {
+            [dockApps addObject:application];
+        }
+        else
+        {
+            [gridApps addObject:application];
+        }
     }
+
+    [self rebuildDockWithApplications:dockApps];
+    [self rebuildPagesWithApplications:gridApps];
 }
 
-#pragma mark - Dock 动作
-
-- (void)settingsTapped
+- (void)rebuildDockWithApplications:(NSArray<NXROMApplication *> *)applications
 {
-    if(self.openSettingsHandler)
+    UIVisualEffectView *dock = (UIVisualEffectView *)self.dock;
+    UIStackView *stack = nil;
+    for(UIView *subview in dock.contentView.subviews)
     {
-        self.openSettingsHandler();
+        if([subview isKindOfClass:UIStackView.class])
+        {
+            stack = (UIStackView *)subview;
+            break;
+        }
     }
-}
-
-- (void)filesTapped
-{
-    NXROMApplication *files = [self firstApplicationWithIdentifierPrefix:@"org.emexlabs.rom.files"];
-    if(files != nil)
+    if(stack == nil)
     {
-        [[NXROMAppRegistry shared] launchApplication:files];
         return;
     }
 
-    /* Files.app 不在 ROM 里时，给一条能看的提示，别弹一个需要 entitlements 的 picker */
-    NSString *rootfs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/rootfs"];
-    NSArray<NSString *> *entries = [NSFileManager.defaultManager contentsOfDirectoryAtPath:rootfs error:nil];
-    NSString *message = [NSString stringWithFormat:@"rootfs: %@\n\n%@",
-                         rootfs,
-                         [entries componentsJoinedByString:@"  "]];
-
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"文件系统"
-                                                                  message:message
-                                                           preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (void)switcherTapped
-{
-    if(self.openAppSwitcherHandler)
+    for(UIView *view in stack.arrangedSubviews.copy)
     {
-        self.openAppSwitcherHandler();
+        [stack removeArrangedSubview:view];
+        [view removeFromSuperview];
+    }
+
+    for(NXROMApplication *application in applications)
+    {
+        NXROMIconView *icon = [[NXROMIconView alloc] initWithApplication:application iconSize:64.0];
+        icon.delegate = self;
+        icon.translatesAutoresizingMaskIntoConstraints = NO;
+        [icon.widthAnchor constraintEqualToConstant:72.0].active = YES;
+        [icon.heightAnchor constraintEqualToConstant:84.0].active = YES;
+        [stack addArrangedSubview:icon];
     }
 }
 
-- (void)debugTapped
+- (void)rebuildPagesWithApplications:(NSArray<NXROMApplication *> *)applications
 {
-    NSMutableString *text = [NSMutableString string];
-    [text appendString:klog_dump() ?: @"(empty)"];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"内核日志"
-                                                                   message:[text length] > 1500 ? [text substringToIndex:1500] : text
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
+    for(NXROMPageView *page in self.pages)
+    {
+        [page removeFromSuperview];
+    }
+    self.pages = [NSMutableArray array];
+
+    const NSUInteger perPage = 24;
+    NSUInteger pageCount = MAX(1, (applications.count + perPage - 1) / perPage);
+
+    for(NSUInteger index = 0; index < pageCount; index++)
+    {
+        NSUInteger start = index * perPage;
+        NSUInteger length = MIN(perPage, applications.count - MIN(start, applications.count));
+        NSArray<NXROMApplication *> *slice = length > 0
+            ? [applications subarrayWithRange:NSMakeRange(start, length)]
+            : @[];
+
+        NXROMPageView *page = [NXROMPageView new];
+        page.delegate = self;
+        page.editing = self.isEditing;
+        page.applications = slice;
+        [self.pagesContainer addSubview:page];
+        [self.pages addObject:page];
+    }
+
+    [self rebuildPageDots:pageCount];
+    [self.view setNeedsLayout];
+    [self.view layoutIfNeeded];
 }
 
-- (nullable NXROMApplication *)firstApplicationWithIdentifierPrefix:(NSString *)prefix
+- (void)layoutPages
 {
-    for(NXROMApplication *application in self.applications)
+    CGFloat width = CGRectGetWidth(self.pagingScrollView.bounds);
+    CGFloat height = CGRectGetHeight(self.pagingScrollView.bounds);
+    if(width <= 0.0 || height <= 0.0)
     {
-        if([application.bundleIdentifier hasPrefix:prefix])
+        return;
+    }
+
+    for(NSUInteger index = 0; index < self.pages.count; index++)
+    {
+        NXROMPageView *page = self.pages[index];
+        page.frame = CGRectMake(width * (CGFloat)index, 0, width, height);
+        [page setNeedsLayout];
+    }
+
+    self.pagesContainer.frame = CGRectMake(0, 0, width * (CGFloat)self.pages.count, height);
+    self.pagingScrollView.contentSize = CGSizeMake(width * (CGFloat)self.pages.count, height);
+}
+
+#pragma mark - 交互
+
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView
+{
+    CGFloat width = CGRectGetWidth(scrollView.bounds);
+    if(width <= 0.0)
+    {
+        return;
+    }
+    NSInteger page = (NSInteger)lround(scrollView.contentOffset.x / width);
+    [self updatePageDots:MAX(0, MIN(page, (NSInteger)self.pages.count - 1))];
+}
+
+- (void)iconViewWasTapped:(NXROMIconView *)iconView
+{
+    if(self.isEditing)
+    {
+        [self exitEditingIfNeeded];
+        return;
+    }
+
+    NXROMApplication *application = iconView.application;
+    if(application.kind == NXROMAppKindFolder)
+    {
+        [self presentFolder:application fromView:iconView.iconView];
+        return;
+    }
+
+    if(self.openApplicationHandler && application != nil)
+    {
+        self.openApplicationHandler(application, iconView.iconView);
+    }
+}
+
+- (void)presentFolder:(NXROMApplication *)folder fromView:(UIView *)sourceView
+{
+    NXROMFolderViewController *controller = [[NXROMFolderViewController alloc] init];
+    controller.title = folder.displayName;
+    controller.children = folder.children ?: @[];
+    controller.modalPresentationStyle = UIModalPresentationOverFullScreen;
+    controller.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+
+    __weak typeof(self) weakSelf = self;
+    controller.openHandler = ^(NXROMApplication *application, UIView *iconView) {
+        [weakSelf dismissViewControllerAnimated:YES completion:^{
+            if(weakSelf.openApplicationHandler)
+            {
+                weakSelf.openApplicationHandler(application, nil);
+            }
+        }];
+    };
+
+    [self presentViewController:controller animated:YES completion:nil];
+}
+
+- (void)handleLongPress:(UILongPressGestureRecognizer *)recognizer
+{
+    if(recognizer.state != UIGestureRecognizerStateBegan)
+    {
+        return;
+    }
+    if(self.applications.count == 0)
+    {
+        return;
+    }
+
+    [NXROMDesign mediumImpact];
+    [self setEditing:YES];
+}
+
+- (void)setEditing:(BOOL)editing
+{
+    _editing = editing;
+    for(NXROMPageView *page in self.pages)
+    {
+        page.editing = editing;
+    }
+
+    UIVisualEffectView *dock = (UIVisualEffectView *)self.dock;
+    for(UIView *subview in dock.contentView.subviews)
+    {
+        if(![subview isKindOfClass:UIStackView.class])
         {
-            return application;
+            continue;
+        }
+        for(UIView *arranged in ((UIStackView *)subview).arrangedSubviews)
+        {
+            if([arranged isKindOfClass:NXROMIconView.class])
+            {
+                ((NXROMIconView *)arranged).editing = editing;
+            }
         }
     }
-    return nil;
+}
+
+- (void)exitEditingIfNeeded
+{
+    if(self.isEditing)
+    {
+        [self setEditing:NO];
+    }
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
+{
+    [super touchesEnded:touches withEvent:event];
+    if(self.isEditing)
+    {
+        [self exitEditingIfNeeded];
+    }
+}
+
+- (UIStatusBarStyle)preferredStatusBarStyle
+{
+    return UIStatusBarStyleLightContent;
+}
+
+#pragma mark - 控制中心手势
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch
+{
+    return gestureRecognizer == self.longPress;
+}
+@end
+
+#pragma mark - 文件夹
+
+/*
+ * 文件夹内容以半透明面板呈现：标题 + 4 列图标网格，点外部或标题关闭。
+ * 只做展示与启动，不实现拖拽排序。
+ */
+@interface NXROMFolderViewController : UIViewController <NXROMIconViewDelegate>
+@property (nonatomic, copy) NSArray<NXROMApplication *> *children;
+@property (nonatomic, copy) void (^openHandler)(NXROMApplication *application, UIView *sourceView);
+@end
+
+@implementation NXROMFolderViewController
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+
+    UIVisualEffectView *panel = [NXROMDesign blurViewWithStyle:UIBlurEffectStyleSystemThickMaterialDark
+                                                  cornerRadius:34.0];
+    [self.view addSubview:panel];
+
+    UILabel *title = [UILabel new];
+    title.translatesAutoresizingMaskIntoConstraints = NO;
+    title.text = self.title;
+    title.font = [UIFont systemFontOfSize:22.0 weight:UIFontWeightBold];
+    title.textColor = UIColor.whiteColor;
+    [panel.contentView addSubview:title];
+
+    UIView *grid = [UIView new];
+    grid.translatesAutoresizingMaskIntoConstraints = NO;
+    [panel.contentView addSubview:grid];
+
+    NSMutableArray<NXROMIconView *> *icons = [NSMutableArray array];
+    for(NXROMApplication *application in self.children)
+    {
+        NXROMIconView *icon = [[NXROMIconView alloc] initWithApplication:application iconSize:60.0];
+        icon.delegate = self;
+        icon.translatesAutoresizingMaskIntoConstraints = NO;
+        [grid addSubview:icon];
+        [icons addObject:icon];
+    }
+
+    [NSLayoutConstraint activateConstraints:@[
+        [panel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20.0],
+        [panel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20.0],
+        [panel.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [panel.heightAnchor constraintEqualToConstant:440.0],
+
+        [title.centerXAnchor constraintEqualToAnchor:panel.contentView.centerXAnchor],
+        [title.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:28.0],
+
+        [grid.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:16.0],
+        [grid.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-16.0],
+        [grid.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:22.0],
+        [grid.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-24.0],
+    ]];
+
+    [self.view layoutIfNeeded];
+
+    /* 4 列网格 */
+    CGFloat gridWidth = CGRectGetWidth(grid.bounds);
+    CGFloat cellWidth = gridWidth / 4.0;
+    CGFloat cellHeight = 96.0;
+
+    for(NSUInteger index = 0; index < icons.count; index++)
+    {
+        CGFloat x = cellWidth * (CGFloat)(index % 4);
+        CGFloat y = cellHeight * (CGFloat)(index / 4);
+        icons[index].frame = CGRectMake(x, y, cellWidth, cellHeight);
+        [icons[index] setNeedsLayout];
+        [icons[index] layoutIfNeeded];
+    }
+
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(close)];
+    [panel addGestureRecognizer:tap];
+}
+
+- (void)iconViewWasTapped:(NXROMIconView *)iconView
+{
+    if(self.openHandler && iconView.application != nil)
+    {
+        self.openHandler(iconView.application, iconView.iconView);
+    }
+}
+
+- (void)close
+{
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 @end

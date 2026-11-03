@@ -1,0 +1,19 @@
+# 这个项目要跨 Windows / macOS 用，统一按文本走 LF，二进制别让 git 乱改
+* text=auto eol=lf
+
+*.sh       text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.py       text eol=lf
+*.m        text eol=lf
+*.h        text eol=lf
+*.c        text eol=lf
+*.cpp      text eol=lf
+*.plist    text eol=lf
+Makefile   text eol=lf
+*.md       text eol=lf
+
+*.ipa      binary
+*.zip      binary
+*.dylib    binary
+*.a        binary

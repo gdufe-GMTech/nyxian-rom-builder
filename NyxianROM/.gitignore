@@ -1,0 +1,15 @@
+build/
+.work/
+.stage/
+.rompkg/
+.modules/
+kexts-bin/
+kexts/upstream/
+Application/
+main
+manifest.sign
+rom.zip
+*.ipa
+*.pyc
+__pycache__/
+.DS_Store

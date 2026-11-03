@@ -1,18 +1,21 @@
 /*
- * NXROMHomeViewController.h — ROM 桌面（图标网格 + Dock + 时钟）
+ * NXROMHomeViewController.h — 主屏
  */
 
 #import <UIKit/UIKit.h>
+#import "NXROMAppRegistry.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
 @interface NXROMHomeViewController : UIViewController
 
-/* 重新扫描应用并刷新网格 */
-- (void)reloadApplications;
-
-@property (nonatomic, copy, nullable) void (^openSettingsHandler)(void);
+/* 点击图标：sourceView 用于缩放转场的起点 */
+@property (nonatomic, copy, nullable) void (^openApplicationHandler)(NXROMApplication *application, UIView *sourceView);
+@property (nonatomic, copy, nullable) void (^openControlCenterHandler)(void);
 @property (nonatomic, copy, nullable) void (^openAppSwitcherHandler)(void);
+
+- (void)reloadApplications;
+- (void)exitEditingIfNeeded;
 
 @end
 

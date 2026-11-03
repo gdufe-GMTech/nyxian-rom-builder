@@ -1,5 +1,5 @@
 /*
- * NXROMShellViewController.h — ROM 的外壳：桌面 + 设置
+ * NXROMShellViewController.h — 外壳：锁屏、主屏、系统 UI 与全屏应用转场
  */
 
 #import <UIKit/UIKit.h>

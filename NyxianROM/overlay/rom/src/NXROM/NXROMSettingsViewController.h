@@ -1,5 +1,5 @@
 /*
- * NXROMSettingsViewController.h — ROM 的"设置"
+ * NXROMSettingsViewController.h — 设置
  */
 
 #import <UIKit/UIKit.h>

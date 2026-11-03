@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/34303236/README.md)
 # NyxianROM
 
 为 Nyxian 构建可替换的用户空间系统槽（ROM slot），并提供配套的打包、签名、刷机与校验工具。
@@ -102,8 +101,8 @@ NyxianROM/
 ├── Makefile                   构建 main 动态库、应用与 kext
 ├── overlay/rom/src/
 │   ├── NXMainSlot.m           槽入口与 kext 加载
-│   └── NXROM/                 桌面、设置、应用注册表、系统信息
-├── appsrc/                    guest 应用示例（Hello、Files）
+│   └── NXROM/                 外壳、锁屏、主屏、系统 UI、设置、内置应用
+├── appsrc/                    guest 应用示例（Hello）
 ├── kexts/                     内核扩展源码与说明
 ├── ci/                        GitHub Actions 与 Codemagic 配置
 └── tools/
@@ -317,13 +316,19 @@ kext 运行于宿主进程地址空间，拥有与宿主相同的权限，不具
 
 | 组件 | 职责 |
 | --- | --- |
-| `NXROMHomeViewController` | 桌面：图标网格、Dock、时钟、主机名 |
-| `NXROMAppRegistry` | 扫描 `rootfs/Application`、槽内 `Application`、`Cache/Payload`，解析图标并启动应用 |
-| `NXROMSystemInfo` | 读取 ksurface 进程表、kext 表与主机名 |
-| `NXROMSettingsViewController` | 系统状态、用户空间控制、权限模式、kext 加载状态、内核日志 |
-| `NXROMShellViewController` | 容器与设置入口 |
+| `NXROMShellViewController` | 外壳：锁屏、主屏、全屏转场、控制中心与应用切换器入口、状态栏 |
+| `NXROMLockScreenViewController` | 锁屏：日期、大号时间、上滑解锁 |
+| `NXROMHomeViewController` | 主屏：分页图标网格、页点、毛玻璃 Dock、长按编辑 |
+| `NXROMDesign` | 版式常量（圆角比例、网格间距、Dock 尺寸）、壁纸、毛玻璃、图标绘制 |
+| `NXROMSystemUI` | 控制中心（连接开关、亮度/音量滑杆、快捷项）与 App 切换器（窗口卡片） |
+| `NXROMBuiltinApps` | 系统应用：时钟（表盘绘制）、计算器、文件浏览 |
+| `NXROMAppRegistry` | 条目来源：内置系统应用与 `Application/*.app`，解析图标并启动 guest 进程 |
+| `NXROMSystemInfo` | 读取 ksurface 进程表、kext 表、主机名，以及槽内 kext 清单 |
+| `NXROMSettingsViewController` | 设置：设备、系统状态、用户空间控制、权限模式、kext、日志、应用清单 |
 
-`NXROMSystemInfo` 与 `NXROMAppRegistry` 通过 `dladdr` 定位所在槽目录，不依赖固定路径。
+主屏条目分两类：`NXROMAppKindBuiltin` 在进程内呈现，`NXROMAppKindGuest` 经 `PEProcessManager` 启动并在窗口服务器中开窗，随后自动最大化。`NXROMSystemInfo` 与 `NXROMAppRegistry` 通过 `dladdr` 定位槽目录，不依赖固定路径。
+
+文件夹由槽内 `nxrom.folders.plist` 定义，格式为 `{ "文件夹名": ["bundle.id", ...] }`；文件不存在时按平铺展示。文件夹图标由前 9 个子项的图标合成预览。
 
 ---
 

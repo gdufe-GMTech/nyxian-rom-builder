@@ -22,15 +22,10 @@ on:
         description: "要编的 Nyxian commit / tag"
         required: false
         default: "0d573db99dca"
-  push:
-    branches: [main]
-    paths:
-      - "NyxianROM/**"
-      - ".github/workflows/build-ipa.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   # ---------------------------------------------------------------- LLVM
