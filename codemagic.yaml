@@ -47,6 +47,15 @@ workflows:
           fi
           du -sh nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs || true
 
+      - name: Install Metal toolchain
+        script: |
+          set -e
+          # Xcode 26+ ships the Metal compiler as a separate downloadable component.
+          # Without it every CompileMetalFile step fails (SwiftTerm's Shaders.metal).
+          sudo xcodebuild -runFirstLaunch || true
+          xcodebuild -downloadComponent MetalToolchain
+          xcrun -sdk iphoneos metal --version || true
+
       - name: Build Nyxian.ipa
         script: |
           set -e
