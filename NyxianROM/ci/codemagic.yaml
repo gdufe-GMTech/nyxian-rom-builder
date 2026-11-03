@@ -32,6 +32,29 @@ workflows:
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos || true
 
+      - name: Narrow LLVM backends
+        script: |
+          set -e
+          # LLVM defaults to building every backend (RISCV, PowerPC, Mips...).
+          # iOS only needs AArch64; X86 is kept as a safety margin for host tools.
+          python3 - <<'PY'
+          import sys
+          path = "nyxian/LLVM-On-iOS/Scripts/swift-ios-toolchain-presets.ini"
+          text = open(path).read()
+          if "LLVM_TARGETS_TO_BUILD" not in text:
+              anchor = "    -DCMAKE_CXX_COMPILER_TARGET=arm64-apple-darwin\n"
+              if anchor not in text:
+                  raise SystemExit("anchor not found in preset file")
+              text = text.replace(
+                  anchor,
+                  anchor + "    -DLLVM_TARGETS_TO_BUILD:STRING=AArch64;X86\n")
+              open(path, "w").write(text)
+              print("patched LLVM_TARGETS_TO_BUILD=AArch64;X86")
+          else:
+              print("preset already sets LLVM_TARGETS_TO_BUILD")
+          PY
+          grep -n "LLVM_TARGETS_TO_BUILD" nyxian/LLVM-On-iOS/Scripts/swift-ios-toolchain-presets.ini || true
+
       - name: Build LLVM-on-iOS (cached)
         script: |
           set -e
