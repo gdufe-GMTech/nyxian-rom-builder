@@ -35,8 +35,11 @@ workflows:
       - name: Narrow LLVM backends
         script: |
           set -e
-          # LLVM defaults to building every backend (RISCV, PowerPC, Mips...).
-          # iOS only needs AArch64; X86 is kept as a safety margin for host tools.
+          # LLVM defaults to building every backend (RISCV, PowerPC, Mips, WebAssembly...).
+          # Apple needs three:
+          #   AArch64  iOS device / Apple silicon host
+          #   ARM      compiler-rt builtins for embedded armv6m/armv7m (thumbv6m triple)
+          #   X86      x86_64/i386 host runtimes
           python3 - <<'PY'
           import sys
           path = "nyxian/LLVM-On-iOS/Scripts/swift-ios-toolchain-presets.ini"
@@ -47,9 +50,9 @@ workflows:
                   raise SystemExit("anchor not found in preset file")
               text = text.replace(
                   anchor,
-                  anchor + "    -DLLVM_TARGETS_TO_BUILD:STRING=AArch64;X86\n")
+                  anchor + "    -DLLVM_TARGETS_TO_BUILD:STRING=AArch64;ARM;X86\n")
               open(path, "w").write(text)
-              print("patched LLVM_TARGETS_TO_BUILD=AArch64;X86")
+              print("patched LLVM_TARGETS_TO_BUILD=AArch64;ARM;X86")
           else:
               print("preset already sets LLVM_TARGETS_TO_BUILD")
           PY
