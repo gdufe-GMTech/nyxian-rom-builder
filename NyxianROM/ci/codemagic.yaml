@@ -1,0 +1,58 @@
+# Codemagic 版（备选：磁盘更大，免费额度 500 分钟/月，可自选 Xcode 版本）
+#
+# 放法：和 Nyxian 源码放同一个仓库根目录，命名 codemagic.yaml
+#       前提：仓库里同时有 Nyxian 源码和 NyxianROM/ 目录。
+#
+# 说明：
+#   * Codemagic 的 mac_mini_m2 实例磁盘比 GitHub 标准 runner 大，编 LLVM 更稳
+#   * xcode 版本用 27.x（Codemagic 会列出可用版本；如果 27 还没 GA 就选 26.x，
+#     然后把 Nyxian 里 `#available(iOS 26.0, *)` 的分支保留）
+#   * 免费额度用完后按分钟计费
+
+workflows:
+  nyxian-rom:
+    name: Nyxian + NyxianROM
+    instance_type: mac_mini_m2
+    max_build_duration: 340
+    environment:
+      xcode: 27.1
+      vars:
+        NYXIAN_REF: "0d573db99dca"
+    cache:
+      cache_paths:
+        - $CM_BUILD_DIR/Frameworks/CoreCompiler/CoreCompilerSupportLibs
+    scripts:
+      - name: Pin ref + submodules
+        script: |
+          set -e
+          git checkout "$NYXIAN_REF"
+          git submodule update --init --recursive
+
+      - name: Build LLVM (cached)
+        script: |
+          set -e
+          if [ ! -d Frameworks/CoreCompiler/CoreCompilerSupportLibs ]; then
+            brew install cmake ninja pkgconf || true
+            make -C LLVM-On-iOS -j"$(sysctl -n hw.ncpu)"
+            rm -rf Frameworks/CoreCompiler/CoreCompilerSupportLibs
+            mkdir -p Frameworks/CoreCompiler/CoreCompilerSupportLibs
+            cp -R LLVM-On-iOS/CoreCompilerSupportLibs/. Frameworks/CoreCompiler/CoreCompilerSupportLibs/
+            cp -R LLVM-On-iOS/LLVM.xcframework Frameworks/CoreCompiler/CoreCompilerSupportLibs/LLVM.xcframework
+          fi
+
+      - name: Build Nyxian
+        script: |
+          set -e
+          brew install pkgconf cmake libarchive dpkg openssl ninja || true
+          make CHECK_DEPS=0
+
+      - name: Build ROM + bake ipa
+        script: |
+          set -e
+          chmod +x NyxianROM/build.sh NyxianROM/tools/fetch_kexts.sh
+          ./NyxianROM/build.sh "$CM_BUILD_DIR" --ipa
+
+    artifacts:
+      - Nyxian.ipa
+      - NyxianROM/rom.zip
+      - NyxianROM/Nyxian-baked.ipa

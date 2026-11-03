@@ -1,0 +1,129 @@
+# 用 GitHub Actions 编 Nyxian + NyxianROM，产出 ipa
+#
+# 放法：把本文件复制到你 fork 的 Nyxian 仓库根目录的 .github/workflows/build-ipa.yml，
+#       并且把 NyxianROM/ 整个目录也提交进那个仓库（和工作流同级）。
+#
+# 为什么用 xcode-27 这个 label：
+#   GitHub 的 xcode-27 镜像（preview）基于 macOS 27，自带 Xcode 27.1 + iOS 27.x SDK，
+#   正是 Nyxian 需要的那个 SDK 版本。macos-26 只有 iOS 26.x，可能编不过。
+#   公告：https://github.com/actions/runner-images/issues/14404
+#
+# 免费额度：公开仓库的标准 macOS runner 不计费（有 6 小时单 job 上限）；
+#          私有仓库按 macOS 分钟数计费且乘 10 倍。
+#
+# 第一次跑会很慢（要编 LLVM-on-iOS）；LLVM 产物会进 cache，之后的 run 只编 App。
+
+name: build-ipa
+
+on:
+  workflow_dispatch:
+    inputs:
+      nyxian_ref:
+        description: "要编的 Nyxian commit / tag"
+        required: false
+        default: "0d573db99dca"
+  push:
+    branches: [main]
+    paths:
+      - "NyxianROM/**"
+      - ".github/workflows/build-ipa.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------- LLVM
+  llvm:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Pin Nyxian ref
+        run: |
+          git checkout "${{ inputs.nyxian_ref || '0d573db99dca' }}"
+          git submodule update --init --recursive
+
+      - name: Submodule revision
+        id: sub
+        run: echo "sha=$(git -C LLVM-On-iOS rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: Frameworks/CoreCompiler/CoreCompilerSupportLibs
+          key: llvm-${{ steps.sub.outputs.sha }}
+
+      - name: Build LLVM-on-iOS
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -eux
+          brew install cmake ninja pkgconf || true
+          make -C LLVM-On-iOS -j"$(sysctl -n hw.ncpu)"
+          rm -rf Frameworks/CoreCompiler/CoreCompilerSupportLibs
+          mkdir -p Frameworks/CoreCompiler/CoreCompilerSupportLibs
+          cp -R LLVM-On-iOS/CoreCompilerSupportLibs/. Frameworks/CoreCompiler/CoreCompilerSupportLibs/
+          cp -R LLVM-On-iOS/LLVM.xcframework Frameworks/CoreCompiler/CoreCompilerSupportLibs/LLVM.xcframework
+          du -sh Frameworks/CoreCompiler/CoreCompilerSupportLibs
+
+  # ------------------------------------------------------------ Nyxian + ROM
+  app:
+    needs: llvm
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Pin Nyxian ref
+        run: |
+          git checkout "${{ inputs.nyxian_ref || '0d573db99dca' }}"
+          git submodule update --init --recursive
+
+      - name: Submodule revision
+        id: sub
+        run: echo "sha=$(git -C LLVM-On-iOS rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: Frameworks/CoreCompiler/CoreCompilerSupportLibs
+          key: llvm-${{ steps.sub.outputs.sha }}
+
+      - name: Make sure LLVM cache is present
+        run: test -d Frameworks/CoreCompiler/CoreCompilerSupportLibs
+
+      - name: Install build deps
+        run: |
+          brew update --quiet || true
+          brew install pkgconf cmake libarchive dpkg openssl ninja || true
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
+
+      - name: Build Nyxian.ipa
+        run: make CHECK_DEPS=0
+
+      - name: Build ROM + bake ipa
+        run: |
+          chmod +x NyxianROM/build.sh NyxianROM/tools/fetch_kexts.sh
+          ./NyxianROM/build.sh "$PWD" --ipa
+
+      - name: Collect
+        run: |
+          mkdir -p out
+          cp Nyxian.ipa out/ 2>/dev/null || true
+          cp NyxianROM/rom.zip out/ 2>/dev/null || true
+          cp NyxianROM/Nyxian-baked.ipa out/ 2>/dev/null || true
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nyxian-ipa-${{ github.run_number }}
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
