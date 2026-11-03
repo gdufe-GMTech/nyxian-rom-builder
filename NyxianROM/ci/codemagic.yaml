@@ -1,16 +1,17 @@
 # Codemagic build for nyxian-rom-builder
 #
-# Produces three artifacts:
-#   nyxian/Nyxian.ipa        stock UI, needs a ROM flash
-#   NyxianROM/rom.zip        ROM slot package
-#   NyxianROM/Nyxian-baked.ipa  stock slot replaced by this ROM, boots straight into it
+# The Swift/LLVM toolchain and the app build are split into two workflows on purpose:
+# the toolchain takes ~1h40 and the free plan caps a single build at 120 minutes.
 #
-# Flow: clone emexlab/Nyxian at NYXIAN_REF, build LLVM-on-iOS (cached),
-# build the app, then run NyxianROM/build.sh --ipa.
+#   Workflow 1  "1-toolchain"  builds LLVM-on-iOS and leaves it in the cache
+#   Workflow 2  "2-app"        restores the cache, builds Nyxian.ipa + ROM + baked ipa
+#
+# Run them in order. Workflow 1 only saves the cache when it succeeds, so if step 2
+# of workflow 2 ever reports a missing cache, re-run workflow 1.
 
 workflows:
-  nyxian-rom:
-    name: Nyxian + NyxianROM
+  toolchain:
+    name: 1-toolchain
     instance_type: mac_mini_m2
     max_build_duration: 120
     environment:
@@ -30,18 +31,17 @@ workflows:
           git checkout "$NYXIAN_REF"
           git submodule update --init --recursive
           xcodebuild -version
-          xcodebuild -showsdks | grep -i iphoneos || true
 
       - name: Narrow LLVM backends
         script: |
           set -e
-          # LLVM defaults to building every backend (RISCV, PowerPC, Mips, WebAssembly...).
-          # Apple needs three:
-          #   AArch64  iOS device / Apple silicon host
+          # LLVM defaults to every backend. Apple needs three:
+          #   AArch64  iOS device / apple silicon host
           #   ARM      compiler-rt builtins for embedded armv6m/armv7m (thumbv6m triple)
           #   X86      x86_64/i386 host runtimes
+          # Note: the runtimes sub-build configures its own LLVM_TARGETS_TO_BUILD list,
+          # so the only thing that matters here is which backends the built clang has.
           python3 - <<'PY'
-          import sys
           path = "nyxian/LLVM-On-iOS/Scripts/swift-ios-toolchain-presets.ini"
           text = open(path).read()
           if "LLVM_TARGETS_TO_BUILD" not in text:
@@ -58,26 +58,57 @@ workflows:
           PY
           grep -n "LLVM_TARGETS_TO_BUILD" nyxian/LLVM-On-iOS/Scripts/swift-ios-toolchain-presets.ini || true
 
-      - name: Build LLVM-on-iOS (cached)
+      - name: Build LLVM-on-iOS
         script: |
           set -e
-          if [ ! -d nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs ]; then
-            brew install cmake ninja pkgconf || true
-            make -C nyxian/LLVM-On-iOS -j"$(sysctl -n hw.ncpu)"
-            rm -rf nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
-            mkdir -p nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
-            cp -R nyxian/LLVM-On-iOS/CoreCompilerSupportLibs/. nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/
-            cp -R nyxian/LLVM-On-iOS/LLVM.xcframework nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/LLVM.xcframework
-          else
-            echo "LLVM cache hit"
+          brew install cmake ninja pkgconf || true
+          make -C nyxian/LLVM-On-iOS -j"$(sysctl -n hw.ncpu)"
+          rm -rf nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
+          mkdir -p nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
+          cp -R nyxian/LLVM-On-iOS/CoreCompilerSupportLibs/. nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/
+          cp -R nyxian/LLVM-On-iOS/LLVM.xcframework nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/LLVM.xcframework
+
+      - name: Verify toolchain
+        script: |
+          set -e
+          du -sh nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
+          ls nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs | head -20
+          test -d nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/LLVM.xcframework
+          echo "toolchain ready; the cache is written when this build succeeds"
+
+  app:
+    name: 2-app
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      xcode: latest
+      vars:
+        NYXIAN_REPO: https://github.com/emexlab/Nyxian.git
+        NYXIAN_REF: "0d573db99dca"
+    cache:
+      cache_paths:
+        - $CM_BUILD_DIR/nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
+    scripts:
+      - name: Clone Nyxian
+        script: |
+          set -e
+          git clone --filter=blob:none "$NYXIAN_REPO" nyxian
+          cd nyxian
+          git checkout "$NYXIAN_REF"
+          git submodule update --init --recursive
+
+      - name: Check toolchain cache
+        script: |
+          set -e
+          if [ ! -d nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/LLVM.xcframework ]; then
+            echo "ERROR: toolchain cache missing. Run workflow '1-toolchain' first."
+            exit 1
           fi
-          du -sh nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs || true
+          du -sh nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
 
       - name: Install Metal toolchain
         script: |
           set -e
-          # Xcode 26+ ships the Metal compiler as a separate downloadable component.
-          # Without it every CompileMetalFile step fails (SwiftTerm's Shaders.metal).
           sudo xcodebuild -runFirstLaunch || true
           xcodebuild -downloadComponent MetalToolchain
           xcrun -sdk iphoneos metal --version || true
