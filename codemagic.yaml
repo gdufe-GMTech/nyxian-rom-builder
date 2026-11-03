@@ -12,7 +12,7 @@ workflows:
   nyxian-rom:
     name: Nyxian + NyxianROM
     instance_type: mac_mini_m2
-    max_build_duration: 240
+    max_build_duration: 120
     environment:
       xcode: latest
       vars:
