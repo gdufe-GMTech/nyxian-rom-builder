@@ -15,15 +15,24 @@ MODE="${2:-build}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$HERE/.work"
 
-if [ ! -x "$NYXIAN_SRC/nxromgen.sh" ]; then
-    echo "error: $NYXIAN_SRC/nxromgen.sh not found or not executable" >&2
+if [ ! -f "$NYXIAN_SRC/nxromgen.sh" ]; then
+    echo "error: $NYXIAN_SRC/nxromgen.sh not found" >&2
     exit 1
 fi
 
 echo ">> nxromgen: $NYXIAN_SRC -> $WORK"
 rm -rf "$WORK"
 mkdir -p "$WORK"
-"$NYXIAN_SRC/nxromgen.sh" "$NYXIAN_SRC" "$WORK"
+
+# 上游 nxromgen 用精确字符串定位补丁点，main 一漂移锚点就消失并直接中止。
+# 这里跑一份"锚点缺失只告警"的副本，保证 ROM 始终能生成；缺哪个补丁会在日志里写明。
+# 副本必须放在 $WORK 之外，因为 nxromgen 第 32 行会 rm -rf "$OUT"。
+GEN="${TMPDIR:-/tmp}/nxromgen-$$.sh"
+trap 'rm -f "$GEN"' EXIT
+python3 "$HERE/tools/soften_nxromgen.py" "$NYXIAN_SRC/nxromgen.sh" "$GEN"
+chmod +x "$GEN"
+"$GEN" "$NYXIAN_SRC" "$WORK"
+rm -f "$GEN"
 
 echo ">> overlay NXROM shell sources"
 cp -R "$HERE/overlay/." "$WORK/"
