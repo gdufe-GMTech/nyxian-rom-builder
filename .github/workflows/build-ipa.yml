@@ -72,7 +72,13 @@ jobs:
         run: |
           set -eux
           brew install cmake ninja pkgconf || true
-          make -C nyxian/LLVM-On-iOS -j"$(sysctl -n hw.ncpu)"
+          # LLVM-On-iOS/Makefile uses ROOT := $(PWD) to locate the cmark static
+          # libraries (cmark-iphoneos-arm64/...). `make -C` does not update the
+          # PWD environment variable, so without overriding it those wildcards
+          # match nothing and llvm.a ends up without cmark -> CoreCompiler later
+          # fails with "Undefined symbols: _cmark_*".
+          make -C nyxian/LLVM-On-iOS -j"$(sysctl -n hw.ncpu)" PWD="$PWD/nyxian/LLVM-On-iOS"
+          ls -l nyxian/LLVM-On-iOS/build/LLVMClangSwift_iphoneos/cmark-iphoneos-arm64/src/libcmark-gfm.a
           rm -rf nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
           mkdir -p nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
           cp -R nyxian/LLVM-On-iOS/CoreCompilerSupportLibs/. nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/
