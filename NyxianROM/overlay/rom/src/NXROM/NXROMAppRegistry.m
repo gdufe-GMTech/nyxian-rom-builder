@@ -392,7 +392,8 @@ static void NXROMSlotAnchor(void) {}
         }
     }
 
-    UIImage *placeholder = [NXROMDesign placeholderIconWithTitle:title size:180.0];
+    UIImage *placeholder = [UIImage systemImageNamed:@"app.fill"
+        withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:80.0 weight:UIFontWeightRegular]];
     self.iconCache[identifier] = placeholder;
     return placeholder;
 }

@@ -1,63 +1,52 @@
 /*
- * NXROMDesign.h — 界面常量与通用构件
+ * NXROMDesign.h — 设计层
  *
- * 目的：把"像不像 iOS"收敛到一处（圆角比例、网格间距、材质、字号），
- * 其余模块只引用这里的宏与工厂方法，避免各页面各写一套。
+ * 只做三件事：
+ *   1. 壁纸（颜色层）
+ *   2. 官方液态玻璃封装：UIGlassEffect / UIGlassContainerEffect（iOS 26+），
+ *      老系统自动退回 UIBlurEffect
+ *   3. 常用字号 / SF Symbol / 触感
+ *
+ * 刻意不提供任何自绘图像的接口：图标一律用 SF Symbol，形状用系统圆角与
+ * systemFill / systemBackground 颜色。
  */
 
 #import <UIKit/UIKit.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
-/* 图标圆角：Apple 的 squircle 比例约 0.2237，配合 continuous 曲线 */
-extern CGFloat const NXROMIconCornerRatio;
-extern CGFloat const NXROMIconSize;          /* 主屏图标边长 */
-extern CGFloat const NXROMGridColumnSpacing;
-extern CGFloat const NXROMGridRowSpacing;
-extern CGFloat const NXROMGridHorizontalInset;
+extern CGFloat const NXROMIconSize;      /* 主屏图标边长 */
+extern CGFloat const NXROMIconCorner;    /* 对应圆角 */
 extern CGFloat const NXROMDockHeight;
-extern CGFloat const NXROMDockCornerRadius;
-extern CGFloat const NXROMPageDotSize;
-extern CGFloat const NXROMPageDotSpacing;
-
-/* 系统 App 图标砖块（设置里那种 29pt 圆角方块） */
-extern CGFloat const NXROMSymbolTileSize;
-extern CGFloat const NXROMSymbolTileCornerRadius;
 
 @interface NXROMDesign : NSObject
 
-/* 主屏壁纸（渐变，不使用 Apple 素材） */
-+ (CAGradientLayer *)wallpaperLayerForBounds:(CGRect)bounds;
+/* 壁纸：深色渐变（Apple 的壁纸是照片，这里用色层替代） */
 + (void)applyWallpaperToView:(UIView *)view;
 
-/* 毛玻璃容器 */
-+ (UIVisualEffectView *)blurViewWithStyle:(UIBlurEffectStyle)style cornerRadius:(CGFloat)radius;
-
 /*
- * 液态玻璃（iOS 26 起 UIKit 提供 UIGlassEffect）。
- * style: 0 = regular（标准），1 = clear（更透明，适合叠在图标/按钮上）
- * 老系统自动退回 UIBlurEffect，不会崩。
+ * 液态玻璃。
+ *  style: 0 = regular（面板），1 = clear（按钮/胶囊）
  */
-+ (UIVisualEffect *)glassEffectWithStyle:(NSInteger)style interactive:(BOOL)interactive;
 + (UIVisualEffectView *)glassViewWithCornerRadius:(CGFloat)radius
                                             style:(NSInteger)style
                                       interactive:(BOOL)interactive;
 
-/* 用 SF Symbol 画一个系统 App 图标砖块 */
-+ (UIView *)symbolTileWithName:(NSString *)symbolName tint:(UIColor *)tint;
+/*
+ * 玻璃容器：把多个玻璃元素合并成一组（iOS 26 的 UIGlassContainerEffect）。
+ * 用法：把若干个 glassView 加进它的 contentView，相邻元素会互相“融合”。
+ */
++ (UIVisualEffectView *)glassContainerWithSpacing:(CGFloat)spacing;
 
-/* 图标占位（无图标时用名称首字） */
-+ (UIImage *)placeholderIconWithTitle:(NSString *)title size:(CGFloat)size;
+/* SF Symbol → UIImage，统一配置点号与字重 */
++ (nullable UIImage *)symbolNamed:(NSString *)name pointSize:(CGFloat)pointSize weight:(UIFontWeight)weight;
 
-/* 圆角图标 */
-+ (UIImageView *)iconViewWithImage:(nullable UIImage *)image
-                             title:(NSString *)title
-                              size:(CGFloat)size;
+/* 系统圆体（iOS 的时间/数字用它更有原生感） */
++ (UIFont *)roundedFontOfSize:(CGFloat)size weight:(UIFontWeight)weight;
 
-/* 主屏网格布局参数（按屏宽自适应列间距） */
-+ (UICollectionViewFlowLayout *)homeGridLayoutForWidth:(CGFloat)width;
+/* 内置 App 的主题色（systemBlue / systemOrange …） */
++ (UIColor *)tintForBuiltinIdentifier:(NSString *)identifier;
 
-/* 触感 */
 + (void)lightImpact;
 + (void)mediumImpact;
 

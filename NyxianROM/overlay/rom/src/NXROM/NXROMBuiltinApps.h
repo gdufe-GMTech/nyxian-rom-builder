@@ -12,7 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface NXROMCalculatorViewController : UIViewController
 @end
 
-@interface NXROMFilesViewController : UIViewController
+@interface NXROMFilesViewController : UITableViewController
 
 - (instancetype)initWithPath:(nullable NSString *)path;
 
