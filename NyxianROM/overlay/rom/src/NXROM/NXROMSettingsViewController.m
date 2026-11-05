@@ -139,7 +139,7 @@ typedef NS_ENUM(NSInteger, NXROMSettingsRowKind) {
         [weakSelf showListWithTitle:@"进程"
                               lines:lines.count ? lines : @[ @"(无)" ]
                         monospaced:NO];
-    }];
+    };
 
     NXROMSettingsRow *kexts = [NXROMSettingsRow new];
     kexts.kind = NXROMSettingsRowKindNavigation;
@@ -152,7 +152,7 @@ typedef NS_ENUM(NSInteger, NXROMSettingsRowKind) {
         [weakSelf showListWithTitle:@"内核扩展"
                               lines:identifiers.count ? identifiers : @[ @"(无)" ]
                         monospaced:NO];
-    }];
+    };
 
     NXROMSettingsRow *ksurface = [NXROMSettingsRow new];
     ksurface.kind = NXROMSettingsRowKindValue;
@@ -172,7 +172,7 @@ typedef NS_ENUM(NSInteger, NXROMSettingsRowKind) {
                         message:@"已启动的 guest 进程会被结束。"
                          action:@"重启"
                          handle:^{ [[PEUserspaceManager shared] rebootUserspace]; }];
-    }];
+    };
 
     NXROMSettingsRow *daemons = [NXROMSettingsRow new];
     daemons.kind = NXROMSettingsRowKindNavigation;
@@ -184,7 +184,7 @@ typedef NS_ENUM(NSInteger, NXROMSettingsRowKind) {
         [weakSelf confirmTitle:@"重载守护进程" message:nil action:@"重载" handle:^{
             [[PEUserspaceManager shared] reloadDaemons];
         }];
-    }];
+    };
 
     NXROMSettingsRow *restore = [NXROMSettingsRow new];
     restore.kind = NXROMSettingsRowKindNavigation;
@@ -196,7 +196,7 @@ typedef NS_ENUM(NSInteger, NXROMSettingsRowKind) {
         [weakSelf confirmTitle:@"恢复默认状态" message:@"会清理应用缓存，不影响已安装的应用。" action:@"恢复" handle:^{
             [[PEUserspaceManager shared] restore];
         }];
-    }];
+    };
 
     NXROMSettingsRow *mode = [NXROMSettingsRow new];
     mode.kind = NXROMSettingsRowKindNavigation;
@@ -242,7 +242,7 @@ typedef NS_ENUM(NSInteger, NXROMSettingsRowKind) {
                               kext[@"bundle"], kext[@"identifier"]]];
         }
         [weakSelf showListWithTitle:@"ROM kext" lines:lines.count ? lines : @[ @"(无)" ] monospaced:NO];
-    }];
+    };
 
     NXROMSettingsRow *log = [NXROMSettingsRow new];
     log.kind = NXROMSettingsRowKindNavigation;
@@ -263,7 +263,7 @@ typedef NS_ENUM(NSInteger, NXROMSettingsRowKind) {
         [weakSelf showListWithTitle:@"内核日志"
                               lines:trimmed.count ? trimmed : @[ @"(空)" ]
                         monospaced:YES];
-    }];
+    };
 
     NXROMSettingsRow *apps = [NXROMSettingsRow new];
     apps.kind = NXROMSettingsRowKindNavigation;
@@ -281,7 +281,7 @@ typedef NS_ENUM(NSInteger, NXROMSettingsRowKind) {
                               application.kind == NXROMAppKindBuiltin ? @"系统" : @"guest"]];
         }
         [weakSelf showListWithTitle:@"应用" lines:lines.count ? lines : @[ @"(无)" ] monospaced:NO];
-    }];
+    };
 
     NXROMSettingsRow *version = [NXROMSettingsRow new];
     version.kind = NXROMSettingsRowKindValue;
