@@ -42,7 +42,11 @@ cp "$HERE/Makefile" "$WORK/Makefile"
 mkdir -p "$WORK/appsrc" "$WORK/tools" "$WORK/kexts"
 cp -R "$HERE/appsrc/." "$WORK/appsrc/"
 cp -R "$HERE/kexts/." "$WORK/kexts/"
-cp "$HERE/tools/." "$WORK/tools/" 2>/dev/null || true
+# 必须带 -R：BSD 的 cp 复制目录内容需要它，缺了会报 "is a directory"，
+# 而 Makefile 里的 python3 tools/mkkext.py 找不到脚本就整颗 kext 编不出来。
+cp -R "$HERE/tools/." "$WORK/tools/"
+rm -rf "$WORK/tools/__pycache__"
+test -f "$WORK/tools/mkkext.py" || { echo "error: tools/mkkext.py missing in $WORK" >&2; exit 1; }
 
 if [ "$MODE" = "--scaffold" ]; then
     echo ">> scaffold only: sources ready at $WORK"
