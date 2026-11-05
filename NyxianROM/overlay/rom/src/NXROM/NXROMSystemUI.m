@@ -158,10 +158,16 @@
     button.layer.cornerCurve = kCACornerCurveContinuous;
     button.tintColor = UIColor.whiteColor;
 
-    [button setImage:[UIImage systemImageNamed:symbol] forState:UIControlStateNormal];
-    [button setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:diameter * 0.42
-                                                                                            weight:UIImageSymbolWeightMedium]
-                                   forState:UIControlStateNormal];
+    /* iOS 27 移除了 -[UIButton setPreferredSymbolConfiguration:forState:]。 */
+    UIImage *image = [UIImage systemImageNamed:symbol];
+    UIImageSymbolConfiguration *configuration =
+        [UIImageSymbolConfiguration configurationWithPointSize:diameter * 0.42
+                                                        weight:UIImageSymbolWeightMedium];
+    if(configuration != nil)
+    {
+        image = [image imageWithConfiguration:configuration];
+    }
+    [button setImage:image forState:UIControlStateNormal];
     [NSLayoutConstraint activateConstraints:@[
         [button.widthAnchor constraintEqualToConstant:diameter],
         [button.heightAnchor constraintEqualToConstant:diameter],
@@ -415,10 +421,16 @@
 {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.tintColor = UIColor.whiteColor;
-    [button setImage:[UIImage systemImageNamed:symbol] forState:UIControlStateNormal];
-    [button setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:20.0
-                                                                                            weight:UIImageSymbolWeightSemibold]
-                                   forState:UIControlStateNormal];
+
+    UIImage *image = [UIImage systemImageNamed:symbol];
+    UIImageSymbolConfiguration *configuration =
+        [UIImageSymbolConfiguration configurationWithPointSize:20.0
+                                                        weight:UIImageSymbolWeightSemibold];
+    if(configuration != nil)
+    {
+        image = [image imageWithConfiguration:configuration];
+    }
+    [button setImage:image forState:UIControlStateNormal];
     return button;
 }
 

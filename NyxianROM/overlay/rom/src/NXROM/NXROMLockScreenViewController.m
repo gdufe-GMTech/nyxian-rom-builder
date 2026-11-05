@@ -205,11 +205,16 @@
     button.layer.cornerCurve = kCACornerCurveContinuous;
     button.tintColor = [UIColor colorWithWhite:1.0 alpha:0.92];
 
+    /* iOS 27 移除了 -[UIButton setPreferredSymbolConfiguration:forState:]，
+     * 改为在生成图片时就把符号配置烘进去。 */
     UIImage *image = [UIImage systemImageNamed:symbol];
+    UIImageSymbolConfiguration *configuration =
+        [UIImageSymbolConfiguration configurationWithPointSize:20.0 weight:UIImageSymbolWeightMedium];
+    if(configuration != nil)
+    {
+        image = [image imageWithConfiguration:configuration];
+    }
     [button setImage:image forState:UIControlStateNormal];
-    [button setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:20.0
-                                                                                            weight:UIImageSymbolWeightMedium]
-                                   forState:UIControlStateNormal];
     return button;
 }
 
