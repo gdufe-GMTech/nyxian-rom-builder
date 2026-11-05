@@ -109,6 +109,25 @@ def bake(ipa_path, dylib_path, rom_path, output, keep_official, strips):
                 with open(rom_path, "rb") as handle:
                     out.writestr(app_prefix + "BakedROM.zip", handle.read())
 
+                # Nyxian 的 ksurface 初始化要求 dylib 同级存在 Application/，
+                # kext 加载器则找同级的 kexts/。烤包模式下 dylib 位于
+                # Payload/<app>/Frameworks/，所以把 ROM 里这两棵树摊到那里，
+                # 否则 ksurface_kinit 会 kpanic（EXC_BREAKPOINT / brk 1）。
+                staged = 0
+                with zipfile.ZipFile(rom_path) as rom:
+                    for info in rom.infolist():
+                        name = info.filename
+                        if name.endswith("/"):
+                            continue
+                        if name.startswith("ROM/Application/") or name.startswith("ROM/kexts/"):
+                            relative = name[len("ROM/"):]
+                            out.writestr(app_prefix + "Frameworks/" + relative, rom.read(name))
+                            staged += 1
+                    if staged == 0:
+                        # 至少让目录存在，fs 初始化的存在性检查才能通过
+                        out.writestr(app_prefix + "Frameworks/Application/.keep", b"")
+                print(f"  staged {staged} ROM file(s) into Frameworks/ (Application + kexts)")
+
     if not replaced:
         raise SystemExit("error: SuperSlot.dylib was not replaced")
 
