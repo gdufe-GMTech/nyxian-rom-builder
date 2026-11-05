@@ -6,6 +6,9 @@
  *
  * 头文件路径在 0.11.5(main) 和 0.11.6.1 之间挪过位置（libkern/ 前缀），
  * 所以这里用 __has_include 兼容两边。
+ *
+ * 日志用 NSLog 而不是 klog_log：kext 是独立 dylib，klog_log_internal 住在
+ * ROM 主 dylib 里，链接期不可见（会报 Undefined symbols: _klog_log_internal）。
  */
 
 @import Foundation;
@@ -16,21 +19,15 @@
 #include <LindChain/ProcEnvironment/Surface/libkern/kxld/image.h>
 #endif
 
-#if __has_include(<LindChain/ProcEnvironment/Utils/klog.h>)
-#include <LindChain/ProcEnvironment/Utils/klog.h>
-#else
-#include <LindChain/ProcEnvironment/Surface/libkern/klog.h>
-#endif
-
 kern_return_t nxrom_hello_init(void)
 {
-    klog_log("org.example.nxrom.hello", "hello from a ROM-bundled kext");
+    NSLog(@"[nxrom.hello] hello from a ROM-bundled kext");
     return KERN_SUCCESS;
 }
 
 kern_return_t nxrom_hello_start(void)
 {
-    klog_log("org.example.nxrom.hello", "started on its own thread");
+    NSLog(@"[nxrom.hello] started on its own thread");
     return KERN_SUCCESS;
 }
 
@@ -41,7 +38,7 @@ kern_return_t nxrom_hello_stop(void)
 
 kern_return_t nxrom_hello_deinit(void)
 {
-    klog_log("org.example.nxrom.hello", "unloaded");
+    NSLog(@"[nxrom.hello] unloaded");
     return KERN_SUCCESS;
 }
 
