@@ -23,9 +23,12 @@ ZSIGNDIR    := $(SRCDIR)/LindChain/ProcEnvironment/LiveContainer/ZSign
 INCDIRS     := -I$(SRCDIR) -I$(STUBDIR) -I$(INCDIR) -I$(ZSIGNDIR) -I$(ZSIGNDIR)/common $(NX_EXTRA_INC)
 FWFLAGS     := -F$(CURDIR)/rom/frameworks
 
-CC          ?= $(shell xcrun -sdk $(SDK) -f clang)
-LD          ?= $(shell xcrun -sdk $(SDK) -f clang++)
-SYSROOT     ?= $(shell xcrun -sdk $(SDK) --show-sdk-path)
+# 注意：不能用 ?= —— make 内置了 CC=cc 和 LD=ld，?= 永远不会覆盖，
+# 结果就是用裸 ld 去链接，报 "ld: unknown options: -isysroot -dynamiclib"。
+# 命令行仍然可以覆盖（make LD=... 优先于这里的 :=）。
+CC          := $(shell xcrun -sdk $(SDK) -f clang)
+LD          := $(shell xcrun -sdk $(SDK) -f clang++)
+SYSROOT     := $(shell xcrun -sdk $(SDK) --show-sdk-path)
 
 SRCS_ALL    := $(shell find $(SRCDIR) \( -name '*.m' -o -name '*.c' -o -name '*.mm' -o -name '*.cpp' \) 2>/dev/null)
 SRCS        := $(filter-out \
