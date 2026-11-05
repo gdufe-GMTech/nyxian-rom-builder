@@ -59,7 +59,7 @@ def report(ipa_path, limit=15):
             print(f"  {info.file_size:>12,}  {info.filename}")
 
 
-def bake(ipa_path, dylib_path, rom_path, output, keep_official, strips):
+def bake(ipa_path, dylib_path, rom_path, output, keep_official, strips, stage_guests=False):
     check_dylib(dylib_path)
 
     with zipfile.ZipFile(ipa_path) as source:
@@ -110,23 +110,34 @@ def bake(ipa_path, dylib_path, rom_path, output, keep_official, strips):
                     out.writestr(app_prefix + "BakedROM.zip", handle.read())
 
                 # Nyxian 的 ksurface 初始化要求 dylib 同级存在 Application/，
-                # kext 加载器则找同级的 kexts/。烤包模式下 dylib 位于
-                # Payload/<app>/Frameworks/，所以把 ROM 里这两棵树摊到那里，
                 # 否则 ksurface_kinit 会 kpanic（EXC_BREAKPOINT / brk 1）。
+                # 烤包模式下 dylib 位于 Payload/<app>/Frameworks/，所以在那里
+                # 放一个占位目录即可。
+                #
+                # 刻意不摊 kexts/：kext 是未签名的，烤包模式没有刷机时的重签
+                # 流程，装了也用不了；而且 kext 目录里可能带 .dSYM，Sideloadly
+                # 会把 DWARF 文件当成 Mach-O 去重签，直接报
+                # "macho sign/edit failed (-40)"。
                 staged = 0
                 with zipfile.ZipFile(rom_path) as rom:
                     for info in rom.infolist():
                         name = info.filename
                         if name.endswith("/"):
                             continue
-                        if name.startswith("ROM/Application/") or name.startswith("ROM/kexts/"):
-                            relative = name[len("ROM/"):]
-                            out.writestr(app_prefix + "Frameworks/" + relative, rom.read(name))
-                            staged += 1
-                    if staged == 0:
-                        # 至少让目录存在，fs 初始化的存在性检查才能通过
-                        out.writestr(app_prefix + "Frameworks/Application/.keep", b"")
-                print(f"  staged {staged} ROM file(s) into Frameworks/ (Application + kexts)")
+                        if ".dSYM/" in name or "/__MACOSX/" in name:
+                            continue
+                        if not name.startswith("ROM/Application/"):
+                            continue
+                        if not stage_guests:
+                            continue
+                        relative = name[len("ROM/"):]
+                        out.writestr(app_prefix + "Frameworks/" + relative, rom.read(name))
+                        staged += 1
+
+                # 占位文件，保证目录一定被创建（zip 里的空目录未必被解出）
+                out.writestr(app_prefix + "Frameworks/Application/.keep", b"")
+                print(f"  Application/ staged: {staged} guest file(s)"
+                      f"{'' if stage_guests else ' (dir only; pass --stage-guests to embed apps)'}")
 
     if not replaced:
         raise SystemExit("error: SuperSlot.dylib was not replaced")
@@ -157,6 +168,8 @@ def main():
     parser.add_argument("--keep-official", dest="keep_official", action="store_true", default=True)
     parser.add_argument("--strip-official", dest="keep_official", action="store_false")
     parser.add_argument("--strip", action="append", default=[], metavar="PATH")
+    parser.add_argument("--stage-guests", dest="stage_guests", action="store_true",
+                        help="embed ROM Application/*.app next to the dylib (needs signing)")
     parser.add_argument("--report", action="store_true")
     args = parser.parse_args()
 
@@ -170,7 +183,8 @@ def main():
     if not os.path.isfile(args.dylib):
         raise SystemExit(f"error: {args.dylib} not found")
 
-    bake(args.ipa, args.dylib, args.rom, args.output, args.keep_official, args.strip)
+    bake(args.ipa, args.dylib, args.rom, args.output, args.keep_official, args.strip,
+         args.stage_guests)
 
 
 if __name__ == "__main__":
