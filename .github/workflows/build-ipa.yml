@@ -90,8 +90,9 @@ jobs:
         id: rom
         continue-on-error: true
         run: |
+          set -o pipefail
           chmod +x NyxianROM/build.sh NyxianROM/tools/fetch_kexts.sh
-          ./NyxianROM/build.sh "$PWD/nyxian" --ipa
+          ./NyxianROM/build.sh "$PWD/nyxian" --ipa 2>&1 | tee rom-build.log
 
       - name: Collect ROM
         if: always()
@@ -107,4 +108,14 @@ jobs:
           name: nyxian-rom-${{ github.run_number }}
           path: out/
           retention-days: 14
+          if-no-files-found: warn
+
+      # Keeps the ROM build output available even when the step above failed,
+      # so a failure can be diagnosed without downloading the whole job log.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rom-log-${{ github.run_number }}
+          path: rom-build.log
+          retention-days: 7
           if-no-files-found: warn
