@@ -1,13 +1,9 @@
-# Build Nyxian + NyxianROM on GitHub Actions.
+# Builds Nyxian.ipa plus the NyxianROM package, reusing a toolchain artifact
+# produced by the "toolchain" workflow. Around 10 minutes per run.
 #
-# Two jobs because the toolchain alone takes ~1h40 and an artifact is the most
-# reliable way to hand it to the app build (Codemagic caps a build at 120 min,
-# which the toolchain exceeds; GitHub gives 6h per job):
-#
-#   toolchain  clone Nyxian, build LLVM-on-iOS, upload it as an artifact
-#   app        download the artifact, install the Metal toolchain, build the app
-#
-# Run: Actions -> build-ipa -> Run workflow. Both jobs run in order.
+# Why the split: the toolchain takes 3-4 hours and rarely changes, while the
+# app/ROM side iterates in minutes. Pass the run id of a successful "toolchain"
+# run (its artifact is kept for 30 days).
 
 name: build-ipa
 
@@ -18,91 +14,24 @@ on:
         description: "Nyxian commit / tag to build"
         required: false
         default: "0d573db99dca"
+      toolchain_run_id:
+        description: "Run id of the workflow run that produced the toolchain artifact"
+        required: false
+        default: "41865439465"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-ipa-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   NYXIAN_REPO: https://github.com/emexlab/Nyxian.git
   NYXIAN_REF: ${{ inputs.nyxian_ref || '0d573db99dca' }}
+  TOOLCHAIN_RUN_ID: ${{ inputs.toolchain_run_id || '41865439465' }}
 
 jobs:
-  # ---------------------------------------------------------------- toolchain
-  toolchain:
-    runs-on: xcode-27
-    timeout-minutes: 350
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Clone Nyxian
-        run: |
-          set -eux
-          git clone --filter=blob:none "$NYXIAN_REPO" nyxian
-          cd nyxian
-          git checkout "$NYXIAN_REF"
-          git submodule update --init --recursive
-          xcodebuild -version
-
-      - name: Narrow LLVM backends
-        run: |
-          set -eux
-          # LLVM defaults to every backend. Apple needs three:
-          #   AArch64  iOS device / apple silicon host
-          #   ARM      compiler-rt builtins for embedded armv6m/armv7m (thumbv6m triple)
-          #   X86      x86_64/i386 host runtimes
-          python3 - <<'PY'
-          path = "nyxian/LLVM-On-iOS/Scripts/swift-ios-toolchain-presets.ini"
-          text = open(path).read()
-          if "LLVM_TARGETS_TO_BUILD" not in text:
-              anchor = "    -DCMAKE_CXX_COMPILER_TARGET=arm64-apple-darwin\n"
-              if anchor not in text:
-                  raise SystemExit("anchor not found in preset file")
-              text = text.replace(
-                  anchor,
-                  anchor + "    -DLLVM_TARGETS_TO_BUILD:STRING=AArch64;ARM;X86\n")
-              open(path, "w").write(text)
-              print("patched LLVM_TARGETS_TO_BUILD=AArch64;ARM;X86")
-          else:
-              print("preset already sets LLVM_TARGETS_TO_BUILD")
-          PY
-          grep -n "LLVM_TARGETS_TO_BUILD" nyxian/LLVM-On-iOS/Scripts/swift-ios-toolchain-presets.ini || true
-
-      - name: Build LLVM-on-iOS
-        run: |
-          set -eux
-          brew install cmake ninja pkgconf || true
-          # LLVM-On-iOS/Makefile uses ROOT := $(PWD) to locate the cmark static
-          # libraries (cmark-iphoneos-arm64/...). `make -C` does not update the
-          # PWD environment variable, so without overriding it those wildcards
-          # match nothing and llvm.a ends up without cmark -> CoreCompiler later
-          # fails with "Undefined symbols: _cmark_*".
-          make -C nyxian/LLVM-On-iOS -j"$(sysctl -n hw.ncpu)" PWD="$PWD/nyxian/LLVM-On-iOS"
-          ls -l nyxian/LLVM-On-iOS/build/LLVMClangSwift_iphoneos/cmark-iphoneos-arm64/src/libcmark-gfm.a
-          rm -rf nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
-          mkdir -p nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
-          cp -R nyxian/LLVM-On-iOS/CoreCompilerSupportLibs/. nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/
-          cp -R nyxian/LLVM-On-iOS/LLVM.xcframework nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/LLVM.xcframework
-          du -sh nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
-
-      - name: Pack toolchain
-        run: |
-          set -eux
-          tar -czf toolchain.tgz -C nyxian/Frameworks/CoreCompiler CoreCompilerSupportLibs
-          ls -lh toolchain.tgz
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: toolchain
-          path: toolchain.tgz
-          retention-days: 3
-          compression-level: 0
-
-  # -------------------------------------------------------------------- app
   app:
-    needs: toolchain
     runs-on: xcode-27
-    timeout-minutes: 350
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -114,10 +43,13 @@ jobs:
           git checkout "$NYXIAN_REF"
           git submodule update --init --recursive
 
-      - uses: actions/download-artifact@v4
+      - name: Download toolchain artifact
+        uses: actions/download-artifact@v4
         with:
           name: toolchain
           path: .
+          run-id: ${{ env.TOOLCHAIN_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Unpack toolchain
         run: |

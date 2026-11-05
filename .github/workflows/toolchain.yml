@@ -1,0 +1,93 @@
+# Rebuilds the LLVM/Swift toolchain and uploads it as an artifact.
+#
+# Only needed when Nyxian's toolchain itself changes (new commit, new preset,
+# narrowed backends). Day-to-day app/ROM iterations go through build-ipa.yml,
+# which downloads this artifact by run id and finishes in ~10 minutes.
+
+name: toolchain
+
+on:
+  workflow_dispatch:
+    inputs:
+      nyxian_ref:
+        description: "Nyxian commit / tag to build the toolchain for"
+        required: false
+        default: "0d573db99dca"
+
+concurrency:
+  group: toolchain-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NYXIAN_REPO: https://github.com/emexlab/Nyxian.git
+  NYXIAN_REF: ${{ inputs.nyxian_ref || '0d573db99dca' }}
+
+jobs:
+  toolchain:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone Nyxian
+        run: |
+          set -eux
+          git clone --filter=blob:none "$NYXIAN_REPO" nyxian
+          cd nyxian
+          git checkout "$NYXIAN_REF"
+          git submodule update --init --recursive
+          xcodebuild -version
+
+      - name: Narrow LLVM backends
+        run: |
+          set -eux
+          # LLVM defaults to every backend. Apple needs three:
+          #   AArch64  iOS device / apple silicon host
+          #   ARM      compiler-rt builtins for embedded armv6m/armv7m (thumbv6m triple)
+          #   X86      x86_64/i386 host runtimes
+          python3 - <<'PY'
+          path = "nyxian/LLVM-On-iOS/Scripts/swift-ios-toolchain-presets.ini"
+          text = open(path).read()
+          if "LLVM_TARGETS_TO_BUILD" not in text:
+              anchor = "    -DCMAKE_CXX_COMPILER_TARGET=arm64-apple-darwin\n"
+              if anchor not in text:
+                  raise SystemExit("anchor not found in preset file")
+              text = text.replace(
+                  anchor,
+                  anchor + "    -DLLVM_TARGETS_TO_BUILD:STRING=AArch64;ARM;X86\n")
+              open(path, "w").write(text)
+              print("patched LLVM_TARGETS_TO_BUILD=AArch64;ARM;X86")
+          else:
+              print("preset already sets LLVM_TARGETS_TO_BUILD")
+          PY
+          grep -n "LLVM_TARGETS_TO_BUILD" nyxian/LLVM-On-iOS/Scripts/swift-ios-toolchain-presets.ini || true
+
+      - name: Build LLVM-on-iOS
+        run: |
+          set -eux
+          brew install cmake ninja pkgconf || true
+          # LLVM-On-iOS/Makefile uses ROOT := $(PWD) to locate the cmark static
+          # libraries (cmark-iphoneos-arm64/...). `make -C` does not update the
+          # PWD environment variable, so without overriding it those wildcards
+          # match nothing and llvm.a ends up without cmark -> CoreCompiler later
+          # fails with "Undefined symbols: _cmark_*".
+          make -C nyxian/LLVM-On-iOS -j"$(sysctl -n hw.ncpu)" PWD="$PWD/nyxian/LLVM-On-iOS"
+          ls -l nyxian/LLVM-On-iOS/build/LLVMClangSwift_iphoneos/cmark-iphoneos-arm64/src/libcmark-gfm.a
+          rm -rf nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
+          mkdir -p nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
+          cp -R nyxian/LLVM-On-iOS/CoreCompilerSupportLibs/. nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/
+          cp -R nyxian/LLVM-On-iOS/LLVM.xcframework nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs/LLVM.xcframework
+          du -sh nyxian/Frameworks/CoreCompiler/CoreCompilerSupportLibs
+
+      - name: Pack toolchain
+        run: |
+          set -eux
+          tar -czf toolchain.tgz -C nyxian/Frameworks/CoreCompiler CoreCompilerSupportLibs
+          ls -lh toolchain.tgz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toolchain
+          path: toolchain.tgz
+          retention-days: 30
+          compression-level: 0
