@@ -9,8 +9,6 @@
 #import "NXROMHomeViewController.h"
 #import "NXROMDesign.h"
 
-@class NXROMFolderViewController;
-
 #include <math.h>
 #include <stdlib.h>
 
@@ -21,6 +19,20 @@
 @protocol NXROMIconViewDelegate <NSObject>
 - (void)iconViewWasTapped:(NXROMIconView *)iconView;
 @end
+
+#pragma mark - 文件夹
+
+/*
+ * 文件夹内容以半透明面板呈现：标题 + 4 列图标网格，点外部或标题关闭。
+ * 只做展示与启动，不实现拖拽排序。
+ *
+ * 声明必须放在使用它的 -presentFolder:fromView: 之前，实现留在文件末尾。
+ */
+@interface NXROMFolderViewController : UIViewController <NXROMIconViewDelegate>
+@property (nonatomic, copy) NSArray<NXROMApplication *> *children;
+@property (nonatomic, copy) void (^openHandler)(NXROMApplication *application, UIView *sourceView);
+@end
+
 
 @interface NXROMIconView : UIControl
 
@@ -636,15 +648,6 @@
 @end
 
 #pragma mark - 文件夹
-
-/*
- * 文件夹内容以半透明面板呈现：标题 + 4 列图标网格，点外部或标题关闭。
- * 只做展示与启动，不实现拖拽排序。
- */
-@interface NXROMFolderViewController : UIViewController <NXROMIconViewDelegate>
-@property (nonatomic, copy) NSArray<NXROMApplication *> *children;
-@property (nonatomic, copy) void (^openHandler)(NXROMApplication *application, UIView *sourceView);
-@end
 
 @implementation NXROMFolderViewController
 
