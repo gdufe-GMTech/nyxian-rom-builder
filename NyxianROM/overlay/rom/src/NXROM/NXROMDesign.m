@@ -61,6 +61,36 @@ CGFloat const NXROMSymbolTileCornerRadius = 7.0;
     return view;
 }
 
++ (UIVisualEffect *)glassEffectWithStyle:(NSInteger)style interactive:(BOOL)interactive
+{
+    if (@available(iOS 26.0, *))
+    {
+        UIGlassEffect *effect = [[UIGlassEffect alloc] initWithStyle:(style == 1
+                                                                     ? UIGlassEffectStyleClear
+                                                                     : UIGlassEffectStyleRegular)];
+        effect.isInteractive = interactive;
+        return effect;
+    }
+
+    /* iOS 26 之前没有液态玻璃，退回系统材质 */
+    return [UIBlurEffect effectWithStyle:(style == 1
+                                         ? UIBlurEffectStyleSystemUltraThinMaterialDark
+                                         : UIBlurEffectStyleSystemThickMaterialDark)];
+}
+
++ (UIVisualEffectView *)glassViewWithCornerRadius:(CGFloat)radius
+                                            style:(NSInteger)style
+                                      interactive:(BOOL)interactive
+{
+    UIVisualEffectView *view = [[UIVisualEffectView alloc] initWithEffect:[self glassEffectWithStyle:style
+                                                                                         interactive:interactive]];
+    view.translatesAutoresizingMaskIntoConstraints = NO;
+    view.layer.cornerRadius = radius;
+    view.layer.cornerCurve = kCACornerCurveContinuous;
+    view.clipsToBounds = YES;
+    return view;
+}
+
 + (UIView *)symbolTileWithName:(NSString *)symbolName tint:(UIColor *)tint
 {
     UIView *tile = [[UIView alloc] initWithFrame:CGRectMake(0, 0, NXROMSymbolTileSize, NXROMSymbolTileSize)];

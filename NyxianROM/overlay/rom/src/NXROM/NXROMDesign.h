@@ -33,6 +33,16 @@ extern CGFloat const NXROMSymbolTileCornerRadius;
 /* 毛玻璃容器 */
 + (UIVisualEffectView *)blurViewWithStyle:(UIBlurEffectStyle)style cornerRadius:(CGFloat)radius;
 
+/*
+ * 液态玻璃（iOS 26 起 UIKit 提供 UIGlassEffect）。
+ * style: 0 = regular（标准），1 = clear（更透明，适合叠在图标/按钮上）
+ * 老系统自动退回 UIBlurEffect，不会崩。
+ */
++ (UIVisualEffect *)glassEffectWithStyle:(NSInteger)style interactive:(BOOL)interactive;
++ (UIVisualEffectView *)glassViewWithCornerRadius:(CGFloat)radius
+                                            style:(NSInteger)style
+                                      interactive:(BOOL)interactive;
+
 /* 用 SF Symbol 画一个系统 App 图标砖块 */
 + (UIView *)symbolTileWithName:(NSString *)symbolName tint:(UIColor *)tint;
 

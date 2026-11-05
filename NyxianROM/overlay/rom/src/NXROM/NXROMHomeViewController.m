@@ -306,8 +306,9 @@
 
 - (void)buildDock
 {
-    UIVisualEffectView *dock = [NXROMDesign blurViewWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark
-                                                 cornerRadius:NXROMDockCornerRadius];
+    UIVisualEffectView *dock = [NXROMDesign glassViewWithCornerRadius:NXROMDockCornerRadius
+                                                              style:1
+                                                        interactive:NO];
     dock.translatesAutoresizingMaskIntoConstraints = NO;
 
     UIStackView *stack = [UIStackView new];
@@ -337,11 +338,8 @@
 
 - (void)buildPagePill
 {
-    self.pagePill = [UIView new];
-    self.pagePill.translatesAutoresizingMaskIntoConstraints = NO;
-    self.pagePill.backgroundColor = [UIColor colorWithWhite:0.15 alpha:0.32];
-    self.pagePill.layer.cornerRadius = 12.0;
-    self.pagePill.layer.cornerCurve = kCACornerCurveContinuous;
+    /* 页点胶囊也走液态玻璃 */
+    self.pagePill = [NXROMDesign glassViewWithCornerRadius:12.0 style:1 interactive:NO];
     self.pagePill.userInteractionEnabled = NO;
     [self.view addSubview:self.pagePill];
 
@@ -373,7 +371,10 @@
         dot.translatesAutoresizingMaskIntoConstraints = NO;
         dot.layer.cornerRadius = dotSize / 2.0;
         dot.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.35];
-        [self.pagePill addSubview:dot];
+        UIView *dotHost = [self.pagePill isKindOfClass:UIVisualEffectView.class]
+            ? ((UIVisualEffectView *)self.pagePill).contentView
+            : self.pagePill;
+        [dotHost addSubview:dot];
         [self.pageDots addObject:dot];
 
         [NSLayoutConstraint activateConstraints:@[
@@ -655,8 +656,9 @@
 {
     [super viewDidLoad];
 
-    UIVisualEffectView *panel = [NXROMDesign blurViewWithStyle:UIBlurEffectStyleSystemThickMaterialDark
-                                                  cornerRadius:34.0];
+    UIVisualEffectView *panel = [NXROMDesign glassViewWithCornerRadius:34.0
+                                                                 style:0
+                                                           interactive:NO];
     [self.view addSubview:panel];
 
     UILabel *title = [UILabel new];

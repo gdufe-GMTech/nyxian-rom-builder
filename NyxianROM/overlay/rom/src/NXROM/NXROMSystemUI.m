@@ -119,7 +119,7 @@
     self.view.backgroundColor = UIColor.clearColor;
     self.toggleButtons = [NSMutableArray array];
 
-    UIVisualEffectView *scrim = [NXROMDesign blurViewWithStyle:UIBlurEffectStyleSystemChromeMaterialDark cornerRadius:0];
+    UIVisualEffectView *scrim = [NXROMDesign glassViewWithCornerRadius:0.0 style:0 interactive:NO];
     scrim.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:scrim];
     self.scrim = scrim;
@@ -503,7 +503,7 @@
 
     self.view.backgroundColor = UIColor.clearColor;
 
-    UIVisualEffectView *scrim = [NXROMDesign blurViewWithStyle:UIBlurEffectStyleSystemChromeMaterialDark cornerRadius:0];
+    UIVisualEffectView *scrim = [NXROMDesign glassViewWithCornerRadius:0.0 style:0 interactive:NO];
     scrim.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:scrim];
     self.scrim = scrim;
