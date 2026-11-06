@@ -74,6 +74,19 @@ jobs:
           brew install pkgconf cmake libarchive dpkg openssl ninja || true
           xcodebuild -showsdks | grep -i iphoneos || true
 
+      # 打印 SDK 里 UIGlassEffect 的 ObjC 接口：Swift 文档写的是 init(style:)，
+      # ObjC 实际选择器需要从头文件确认，失败时靠这段日志定名。
+      - name: Dump glass SDK surface
+        run: |
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          H="$SDK/System/Library/Frameworks/UIKit.framework/Headers"
+          ls "$H" | grep -i glass || true
+          for f in "$H"/UIGlass*.h; do
+            [ -f "$f" ] || continue
+            echo "=== $f"
+            grep -n -E "interface|init|Style|nteractive|spacing" "$f" | head -40
+          done
+
       - name: Build Nyxian.ipa
         run: make -C nyxian CHECK_DEPS=0
 

@@ -41,6 +41,109 @@ CGFloat const NXROMDockHeight = 96.0;
 
 #pragma mark - 液态玻璃
 
+/*
+ * UIGlassEffect 在 iOS 27 SDK 里的 ObjC 接口与 Swift 文档并不完全对应：
+ * -initWithStyle: 与 isInteractive 都没有导出。为了不依赖具体方法名，
+ * 这里用运行时按候选选择器查找；任何一个都不匹配时退回 UIBlurEffect。
+ */
+static id NXROMCallWithIntegerArg(id target, SEL selector, NSInteger value)
+{
+    NSMethodSignature *signature = [target methodSignatureForSelector:selector];
+    if (signature == nil)
+    {
+        return nil;
+    }
+
+    NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+    invocation.target = target;
+    invocation.selector = selector;
+    [invocation setArgument:&value atIndex:2];
+    [invocation invoke];
+
+    void *result = NULL;
+    [invocation getReturnValue:&result];
+    return (__bridge id)result;
+}
+
+static UIVisualEffect *NXROMCreateGlassEffect(NSInteger style, BOOL interactive)
+{
+    Class glassClass = NSClassFromString(@"UIGlassEffect");
+    if (glassClass == Nil)
+    {
+        return nil;
+    }
+
+    NSInteger rawStyle = (style == 1) ? 1 : 0;   /* clear / regular */
+    id effect = nil;
+
+    /* 类工厂：+glassEffectWithStyle: / +effectWithStyle: */
+    for (NSString *name in @[ @"glassEffectWithStyle:", @"effectWithStyle:", @"glassWithStyle:" ])
+    {
+        SEL selector = NSSelectorFromString(name);
+        if ([glassClass respondsToSelector:selector])
+        {
+            effect = NXROMCallWithIntegerArg(glassClass, selector, rawStyle);
+            if (effect != nil)
+            {
+                break;
+            }
+        }
+    }
+
+    /* 实例初始化：-initWithStyle: / -initWithGlassStyle: / -initWithEffectStyle: */
+    if (effect == nil)
+    {
+        for (NSString *name in @[ @"initWithStyle:", @"initWithGlassStyle:", @"initWithEffectStyle:" ])
+        {
+            SEL selector = NSSelectorFromString(name);
+            if ([glassClass instancesRespondToSelector:selector])
+            {
+                effect = NXROMCallWithIntegerArg([glassClass alloc], selector, rawStyle);
+                if (effect != nil)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    if (effect == nil)
+    {
+        return nil;
+    }
+
+    if (interactive)
+    {
+        /* setInteractive: 与 setValue:forKey:@"interactive" 都试一遍 */
+        SEL setter = NSSelectorFromString(@"setInteractive:");
+        if ([effect respondsToSelector:setter])
+        {
+            NSMethodSignature *signature = [effect methodSignatureForSelector:setter];
+            if (signature != nil)
+            {
+                NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+                invocation.target = effect;
+                invocation.selector = setter;
+                BOOL flag = YES;
+                [invocation setArgument:&flag atIndex:2];
+                [invocation invoke];
+            }
+        }
+        else
+        {
+            @try
+            {
+                [effect setValue:@(YES) forKey:@"interactive"];
+            }
+            @catch (__unused NSException *exception)
+            {
+            }
+        }
+    }
+
+    return effect;
+}
+
 + (UIVisualEffectView *)glassViewWithCornerRadius:(CGFloat)radius
                                             style:(NSInteger)style
                                       interactive:(BOOL)interactive
@@ -49,13 +152,10 @@ CGFloat const NXROMDockHeight = 96.0;
 
     if (@available(iOS 26.0, *))
     {
-        UIGlassEffect *glass = [[UIGlassEffect alloc] initWithStyle:(style == 1
-                                                                    ? UIGlassEffectStyleClear
-                                                                    : UIGlassEffectStyleRegular)];
-        glass.isInteractive = interactive;
-        effect = glass;
+        effect = NXROMCreateGlassEffect(style, interactive);
     }
-    else
+
+    if (effect == nil)
     {
         effect = [UIBlurEffect effectWithStyle:(style == 1
                                                ? UIBlurEffectStyleSystemUltraThinMaterialDark
@@ -72,18 +172,37 @@ CGFloat const NXROMDockHeight = 96.0;
 
 + (UIVisualEffectView *)glassContainerWithSpacing:(CGFloat)spacing
 {
+    UIVisualEffect *effect = nil;
+
     if (@available(iOS 26.0, *))
     {
-        UIGlassContainerEffect *effect = [[UIGlassContainerEffect alloc] init];
-        effect.spacing = spacing;
-
-        UIVisualEffectView *view = [[UIVisualEffectView alloc] initWithEffect:effect];
-        view.translatesAutoresizingMaskIntoConstraints = NO;
-        return view;
+        /* 同样走运行时：容器类的 ObjC 属性名与 Swift 文档未必一致 */
+        Class containerClass = NSClassFromString(@"UIGlassContainerEffect");
+        if (containerClass != Nil)
+        {
+            id container = [containerClass new];
+            if (container != nil)
+            {
+                @try
+                {
+                    [container setValue:@(spacing) forKey:@"spacing"];
+                }
+                @catch (__unused NSException *exception)
+                {
+                }
+                effect = (UIVisualEffect *)container;
+            }
+        }
     }
 
-    /* 老系统：容器退化成一块普通玻璃，子元素各自叠在上面 */
-    return [self glassViewWithCornerRadius:0.0 style:0 interactive:NO];
+    if (effect == nil)
+    {
+        effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThickMaterialDark];
+    }
+
+    UIVisualEffectView *view = [[UIVisualEffectView alloc] initWithEffect:effect];
+    view.translatesAutoresizingMaskIntoConstraints = NO;
+    return view;
 }
 
 #pragma mark - 资源
