@@ -146,12 +146,11 @@ static CGFloat const kNXROMGridTop = 58.0;
 @end
 
 @implementation NXROMPageView
-
-@synthesize applications = _applications;
-
 {
     NSMutableArray<NXROMIconButton *> *_buttons;
 }
+
+@synthesize applications = _applications;
 
 - (instancetype)initWithFrame:(CGRect)frame
 {
