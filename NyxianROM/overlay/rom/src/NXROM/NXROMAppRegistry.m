@@ -100,40 +100,16 @@ static void NXROMSlotAnchor(void) {}
     return result;
 }
 
-- (UIImage *)iconForSymbol:(NSString *)symbol tint:(UIColor *)tint name:(NSString *)name
+- (nullable UIImage *)iconForSymbol:(NSString *)symbol tint:(UIColor *)tint name:(NSString *)name
 {
-    UIImage *cached = self.iconCache[name];
-    if(cached != nil)
-    {
-        return cached;
-    }
-
-    CGFloat size = 180.0;
-    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(size, size)];
-    UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
-        CGRect rect = CGRectMake(0, 0, size, size);
-        UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:rect cornerRadius:size * NXROMIconCornerRatio];
-        [path addClip];
-
-        UIColor *top = [tint colorWithAlphaComponent:0.95];
-        UIColor *bottom = [tint colorWithAlphaComponent:0.62];
-        CGGradientRef gradient = CGGradientCreateWithColors(NULL, (__bridge CFArrayRef)@[ (id)top.CGColor, (id)bottom.CGColor ], NULL);
-        CGContextDrawLinearGradient(context.CGContext, gradient, CGPointMake(0, 0), CGPointMake(0, size), 0);
-        CGGradientRelease(gradient);
-
-        UIImage *symbolImage = [UIImage systemImageNamed:symbol];
-        UIImageSymbolConfiguration *configuration = [UIImageSymbolConfiguration configurationWithPointSize:size * 0.46
-                                                                                                  weight:UIImageSymbolWeightMedium];
-        symbolImage = [symbolImage imageByApplyingSymbolConfiguration:configuration];
-        CGSize symbolSize = symbolImage.size;
-        [symbolImage drawInRect:CGRectMake((size - symbolSize.width) / 2.0, (size - symbolSize.height) / 2.0,
-                                           symbolSize.width, symbolSize.height)
-                      blendMode:kCGBlendModeNormal
-                          alpha:1.0];
-    }];
-
-    self.iconCache[name] = image;
-    return image;
+    /*
+     * 不再自绘位图：主屏会用 systemFill 圆角块 + SF Symbol 自行渲染，
+     * 这里返回 nil 即可（Home 会读 symbolName / tintColor）。
+     */
+    (void)symbol;
+    (void)tint;
+    (void)name;
+    return nil;
 }
 
 - (nullable NSString *)rootfsPath
@@ -276,36 +252,11 @@ static void NXROMSlotAnchor(void) {}
     return result;
 }
 
-- (UIImage *)folderIconForChildren:(NSArray<NXROMApplication *> *)children
+- (nullable UIImage *)folderIconForChildren:(NSArray<NXROMApplication *> *)children
 {
-    CGFloat size = 180.0;
-    CGFloat inner = 46.0;
-    CGFloat gap = 6.0;
-
-    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(size, size)];
-    return [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
-        CGRect rect = CGRectMake(0, 0, size, size);
-        UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:rect cornerRadius:size * NXROMIconCornerRatio];
-        [[UIColor colorWithWhite:1.0 alpha:0.18] setFill];
-        [path fill];
-
-        CGFloat startX = (size - (inner * 3.0 + gap * 2.0)) / 2.0;
-        CGFloat startY = startX;
-
-        for(NSUInteger index = 0; index < MIN(children.count, (NSUInteger)9); index++)
-        {
-            NSUInteger column = index % 3;
-            NSUInteger row = index / 3;
-            CGRect frame = CGRectMake(startX + (inner + gap) * (CGFloat)column,
-                                      startY + (inner + gap) * (CGFloat)row,
-                                      inner, inner);
-            UIBezierPath *clip = [UIBezierPath bezierPathWithRoundedRect:frame cornerRadius:inner * NXROMIconCornerRatio];
-            CGContextSaveGState(context.CGContext);
-            [clip addClip];
-            [children[index].icon drawInRect:frame];
-            CGContextRestoreGState(context.CGContext);
-        }
-    }];
+    /* 文件夹图标同样交给主屏用 SF Symbol 渲染 */
+    (void)children;
+    return nil;
 }
 
 - (nullable NXROMApplication *)applicationAtBundlePath:(NSString *)bundlePath fromROM:(BOOL)fromROM
